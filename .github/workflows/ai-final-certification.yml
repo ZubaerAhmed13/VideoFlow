@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - vf_ai_ci_small.tar.xz
+      - ci/tsfix.patch
       - .github/workflows/ai-final-certification.yml
 
 permissions:
@@ -42,6 +43,14 @@ jobs:
           test -f work/package.json
           test -f work/scripts/stage-ai-pack-ci.sh
           test -f work/tests/e2e/videoflow.spec.ts
+
+      - name: Apply certification fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ci/tsfix.patch
+          cd work
+          patch -p1 < ../ci/tsfix.patch
 
       - name: Set up Node 22.13
         uses: actions/setup-node@v4
