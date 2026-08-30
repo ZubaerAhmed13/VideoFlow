@@ -1,0 +1,18 @@
+diff -ruN vf_ci_testbase/tests/rendered-html.test.mjs vf_ci_patch/tests/rendered-html.test.mjs
+--- vf_ci_testbase/tests/rendered-html.test.mjs	2026-08-30 14:16:37.000000000 +0000
++++ vf_ci_patch/tests/rendered-html.test.mjs	2026-08-30 19:32:42.736868248 +0000
+@@ -1,9 +1,12 @@
+ import assert from "node:assert/strict";
+-import { readFile } from "node:fs/promises";
++import { access, readFile } from "node:fs/promises";
+ import test from "node:test";
+ 
+ test("renders VideoFlow metadata and local-first shell", async () => {
+-  const html = await readFile(new URL("../dist/index.html", import.meta.url), "utf8");
++  const clientIndex = new URL("../dist/client/index.html", import.meta.url);
++  const rootIndex = new URL("../dist/index.html", import.meta.url);
++  const indexUrl = await access(clientIndex).then(() => clientIndex).catch(() => rootIndex);
++  const html = await readFile(indexUrl, "utf8");
+   assert.match(html, /<title>VideoFlow Professional Core<\/title>/i);
+   assert.match(html, /<link rel="manifest" href="\.\/manifest\.webmanifest"/i);
+   assert.match(html, /Local Mode/i);
