@@ -11,6 +11,7 @@ on:
       - ci/testfix.patch
       - ci/disttestfix.patch
       - ci/browserfix.patch
+      - ci/final-browser-fixes.py
       - .github/workflows/ai-final-certification.yml
 
 permissions:
@@ -57,12 +58,14 @@ jobs:
           test -f ci/testfix.patch
           test -f ci/disttestfix.patch
           test -f ci/browserfix.patch
+          test -f ci/final-browser-fixes.py
           cd work
           patch -p1 < ../ci/tsfix.patch
           patch -p1 < ../ci/lintfix.patch
           patch -p1 < ../ci/testfix.patch
           patch -p1 < ../ci/disttestfix.patch
           patch -p1 < ../ci/browserfix.patch
+          python ../ci/final-browser-fixes.py
 
       - name: Set up Node 22.13
         uses: actions/setup-node@v4
