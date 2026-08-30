@@ -1,0 +1,166 @@
+name: VideoFlow AI Final Certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - vf_ai_ci_small.tar.xz
+      - .github/workflows/ai-final-certification.yml
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_ARCHIVE: vf_ai_ci_small.tar.xz
+  SOURCE_SHA256: 1885a7617387e6af74d5931779fd3871d00bcf92a4abf5f09e1caa10c5e4131e
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout certification payload
+        uses: actions/checkout@v4
+
+      - name: Verify exact source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$SOURCE_ARCHIVE"
+          echo "$SOURCE_SHA256  $SOURCE_ARCHIVE" | sha256sum --check --strict
+          test "$(stat -c%s "$SOURCE_ARCHIVE")" = "246928"
+
+      - name: Extract isolated source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf work
+          mkdir work
+          tar -xJf "$SOURCE_ARCHIVE" -C work
+          test -f work/package-lock.json
+          test -f work/package.json
+          test -f work/scripts/stage-ai-pack-ci.sh
+          test -f work/tests/e2e/videoflow.spec.ts
+
+      - name: Set up Node 22.13
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+          cache-dependency-path: work/package-lock.json
+
+      - name: Install exact dependencies
+        working-directory: work
+        run: npm ci
+
+      - name: Install native fixture dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Generate deterministic fixtures
+        working-directory: work
+        run: npm run fixtures
+
+      - name: Stage checksum-pinned local AI pack
+        working-directory: work
+        run: bash scripts/stage-ai-pack-ci.sh
+
+      - name: Security source gate
+        working-directory: work
+        run: npm run verify:security
+
+      - name: TypeScript gate
+        working-directory: work
+        run: npx tsc --noEmit
+
+      - name: Lint gate
+        working-directory: work
+        run: npm run lint
+
+      - name: Portable unit and architecture tests
+        working-directory: work
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-results
+          npm run test:unit | tee ci-results/unit.log
+
+      - name: Deterministic render-plan gate
+        working-directory: work
+        run: npm run verify:render
+
+      - name: Fresh production build
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          npm run build
+
+      - name: Verify fresh production dist and AI pack
+        working-directory: work
+        env:
+          VIDEOFLOW_REQUIRE_AI_PACK: "1"
+        run: npm run verify:dist
+
+      - name: Install Chromium Firefox WebKit
+        working-directory: work
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Run complete browser and local-AI matrix
+        working-directory: work
+        run: npm run test:e2e
+
+      - name: Run dedicated real 3 GiB 4K Chromium lifecycle
+        working-directory: work
+        env:
+          VIDEOFLOW_LARGE_MEDIA_CERT: "1"
+        run: npx playwright test tests/e2e/large-media.spec.ts --project=chromium --reporter=line
+
+      - name: Generate certification from runner evidence
+        working-directory: work
+        run: npm run finalize:certification
+
+      - name: Package certified AI release
+        working-directory: work
+        run: npm run package:release
+
+      - name: Verify final archive
+        working-directory: work
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -t VideoFlow_Professional_Core_1.0.0_AI_Release.zip
+          sha256sum VideoFlow_Professional_Core_1.0.0_AI_Release.zip | tee ci-results/release.sha256
+
+      - name: Upload browser report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: work/playwright-report
+          if-no-files-found: ignore
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: certification-evidence
+          path: work/ci-results
+          if-no-files-found: ignore
+
+      - name: Upload certified AI release
+        uses: actions/upload-artifact@v4
+        with:
+          name: videoflow-ai-release
+          path: work/VideoFlow_Professional_Core_1.0.0_AI_Release.zip
+          if-no-files-found: error
+
+      - name: Upload certified static site
+        uses: actions/upload-artifact@v4
+        with:
+          name: videoflow-static-site
+          path: work/dist
+          if-no-files-found: error
