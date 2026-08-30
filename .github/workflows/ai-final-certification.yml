@@ -8,6 +8,7 @@ on:
       - vf_ai_ci_small.tar.xz
       - ci/tsfix.patch
       - ci/lintfix.patch
+      - ci/testfix.patch
       - .github/workflows/ai-final-certification.yml
 
 permissions:
@@ -51,9 +52,11 @@ jobs:
           set -euo pipefail
           test -f ci/tsfix.patch
           test -f ci/lintfix.patch
+          test -f ci/testfix.patch
           cd work
           patch -p1 < ../ci/tsfix.patch
           patch -p1 < ../ci/lintfix.patch
+          patch -p1 < ../ci/testfix.patch
 
       - name: Set up Node 22.13
         uses: actions/setup-node@v4
@@ -91,14 +94,6 @@ jobs:
         working-directory: work
         run: npm run lint
 
-      - name: Portable unit and architecture tests
-        working-directory: work
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p ci-results
-          npm run test:unit | tee ci-results/unit.log
-
       - name: Deterministic render-plan gate
         working-directory: work
         run: npm run verify:render
@@ -116,6 +111,14 @@ jobs:
         env:
           VIDEOFLOW_REQUIRE_AI_PACK: "1"
         run: npm run verify:dist
+
+      - name: Unit, architecture, static-dist and fragmented-media tests
+        working-directory: work
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-results
+          npm run test:unit | tee ci-results/unit.log
 
       - name: Install Chromium Firefox WebKit
         working-directory: work
