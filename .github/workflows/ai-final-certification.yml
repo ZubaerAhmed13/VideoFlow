@@ -7,6 +7,7 @@ on:
     paths:
       - vf_ai_ci_small.tar.xz
       - ci/tsfix.patch
+      - ci/lintfix.patch
       - .github/workflows/ai-final-certification.yml
 
 permissions:
@@ -49,8 +50,10 @@ jobs:
         run: |
           set -euo pipefail
           test -f ci/tsfix.patch
+          test -f ci/lintfix.patch
           cd work
           patch -p1 < ../ci/tsfix.patch
+          patch -p1 < ../ci/lintfix.patch
 
       - name: Set up Node 22.13
         uses: actions/setup-node@v4
