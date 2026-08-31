@@ -20,6 +20,14 @@ const required = [
 ];
 for (const name of required)
   assert.ok(existsSync(join(output, name)), `Missing release asset: ${name}`);
+const ffmpegCoreModule = readFileSync(join(output, "vendor/ffmpeg/ffmpeg-core.js"), "utf8");
+assert.match(ffmpegCoreModule, /export default createFFmpegCore/, "FFmpeg core must be the ESM build used by the module worker");
+
+function assertWasmMagic(name) {
+  const bytes = readFileSync(join(output, name));
+  assert.deepEqual([...bytes.subarray(0, 4)], [0x00, 0x61, 0x73, 0x6d], `${name} is not a WebAssembly binary`);
+}
+assertWasmMagic("vendor/ffmpeg/ffmpeg-core.wasm");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const buildInfo = JSON.parse(readFileSync(join(output, "build-info.json"), "utf8"));
 assert.equal(buildInfo.version, packageJson.version, "Production version does not match source package version");
@@ -37,6 +45,8 @@ if (requireAI) {
     "vendor/onnx/ort-wasm-simd-threaded.wasm",
   ];
   for (const name of aiRequired) assert.ok(existsSync(join(output, name)), `Missing AI release asset: ${name}`);
+  assertWasmMagic("vendor/onnx/ort-wasm-simd-threaded.jsep.wasm");
+  assertWasmMagic("vendor/onnx/ort-wasm-simd-threaded.wasm");
   const modelBytes = readFileSync(join(output, "models/lama-512-int8.onnx"));
   const modelSha = createHash("sha256").update(modelBytes).digest("hex");
   assert.equal(modelSha, "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe", "AI model checksum mismatch in production dist");

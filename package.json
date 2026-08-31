@@ -18,7 +18,7 @@
     "verify:release": "node scripts/verify-release.mjs",
     "package:release": "node scripts/package-release.mjs",
     "package:github-upload": "node scripts/create-github-upload-kit.mjs",
-    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .tmp-ai-pack",
     "test:unit": "node --test tests/*.test.mjs",
     "verify:dist": "node scripts/verify-release.mjs",
     "verify:nested": "node scripts/verify-nested-http.mjs",

@@ -37,12 +37,17 @@ test("GitHub web-upload asset parts reconstruct exact release binaries", () => {
   }
 });
 
-test("release and Pages workflows restore split assets before dependency install", () => {
-  for (const workflow of ["release-verification.yml", "deploy-pages.yml"]) {
-    const source = readFileSync(join(root, ".github", "workflows", workflow), "utf8");
-    const restore = source.indexOf("npm run restore:large-assets -- --if-present");
-    const install = source.indexOf("npm ci");
-    assert.ok(restore >= 0, `${workflow} is missing split-asset restoration`);
-    assert.ok(restore < install, `${workflow} must restore assets before npm ci`);
-  }
+test("release verification restores assets before install and Pages deploys only its certified artifact", () => {
+  const release = readFileSync(join(root, ".github", "workflows", "release-verification.yml"), "utf8");
+  const restore = release.indexOf("npm run restore:large-assets -- --if-present");
+  const install = release.indexOf("npm ci");
+  assert.ok(restore >= 0, "release verification is missing split-asset restoration");
+  assert.ok(restore < install, "release verification must restore assets before npm ci");
+  assert.match(release, /name: videoflow-static-site[\s\S]*path: \.pages-dist/);
+
+  const pages = readFileSync(join(root, ".github", "workflows", "deploy-pages.yml"), "utf8");
+  assert.match(pages, /workflow_run:[\s\S]*VideoFlow AI release verification/);
+  assert.match(pages, /workflow_run\.conclusion == 'success'/);
+  assert.match(pages, /name: videoflow-static-site/);
+  assert.match(pages, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/);
 });

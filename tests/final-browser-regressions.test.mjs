@@ -5,7 +5,9 @@ import { readFile } from "node:fs/promises";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("static test server serves module runtime with JavaScript MIME", async () => {
-  assert.match(await read("scripts/serve-dist.mjs"), /"\.mjs": "text\/javascript; charset=utf-8"/);
+  const server = await read("scripts/serve-dist.mjs");
+  assert.match(server, /"\.mjs": "text\/javascript; charset=utf-8"/);
+  assert.match(server, /writeHead\(404/);
 });
 
 test("export range follows newly imported project duration", async () => {
@@ -19,11 +21,20 @@ test("ONNX WASM falls back to one thread without cross-origin isolation", async 
   assert.match(await read("lib/videoflow/ai/AIInferenceEngine.ts"), /globalThis\.crossOriginIsolated[^\n]+: 1/);
 });
 
-test("Firefox browser matrix uses generated VP9 Opus fixtures", async () => {
+test("nested browser runtimes resolve local ESM and WASM companions explicitly", async () => {
+  assert.match(await read("scripts/copy-ffmpeg-assets.mjs"), /@ffmpeg\/core\/dist\/esm/);
+  assert.match(await read("lib/videoflow/ai/AIInferenceEngine.ts"), /wasmPaths = deploymentAssetUrl\("vendor\/onnx\/"\)/);
+  assert.match(await read("workers/ai-inference.worker.ts"), /runtime\.env\.wasm\.wasmPaths = data\.wasmBaseUrl/);
+  assert.match(await read("scripts/verify-release.mjs"), /export default createFFmpegCore/);
+  assert.match(await read("scripts/verify-nested-http.mjs"), /WebAssembly bytes/);
+});
+
+test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {
   const fixtures = await read("scripts/generate-test-fixtures.mjs");
   const e2e = await read("tests/e2e/videoflow.spec.ts");
   assert.match(fixtures, /overlap-source\.webm/);
-  assert.match(fixtures, /libvpx-vp9/);
+  assert.match(fixtures, /"libvpx"/);
+  assert.match(fixtures, /libvorbis/);
   assert.match(e2e, /firefoxFixture/);
   assert.match(e2e, /firefoxAI/);
 });

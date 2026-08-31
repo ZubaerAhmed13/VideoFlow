@@ -1,11 +1,12 @@
 name: Deploy VideoFlow to GitHub Pages
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["VideoFlow AI release verification"]
+    types: [completed]
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -15,81 +16,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-gate:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.13.0
-          cache: npm
-      - name: Restore checksum-pinned split release assets
-        run: npm run restore:large-assets -- --if-present
-      - name: Install locked dependencies
-        run: npm ci
-      - name: Install native fixture dependency
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-      - name: Generate copyright-safe fixtures
-        run: npm run fixtures
-      - name: Stage checksum-pinned local AI pack
-        run: bash scripts/stage-ai-pack-ci.sh
-      - name: Security gate
-        run: npm run verify:security
-      - name: TypeScript
-        run: npx tsc --noEmit
-      - name: Lint
-        run: npm run lint
-      - name: Deterministic renderer gate
-        run: npm run verify:render
-      - name: Fresh production build
-        run: |
-          rm -rf dist
-          npm run build
-      - name: Static/nested-path distribution gate
-        env:
-          VIDEOFLOW_REQUIRE_AI_PACK: "1"
-        run: npm run verify:dist
-      - name: Packaged nested HTTP gate
-        run: npm run verify:nested
-      - name: Unit, architecture and static-dist tests
-        run: |
-          mkdir -p ci-results
-          npm run test:unit | tee ci-results/unit.log
-      - name: Media quality and colour fidelity gate
-        run: npm run cert:quality
-      - name: Local AI runtime/model/inference gate
-        run: npm run cert:ai:wasm
-      - name: Install release browser matrix
-        run: npx playwright install --with-deps chromium firefox webkit
-      - name: Chromium / Firefox / WebKit + offline PWA + AI gates
-        run: npm run test:e2e
-      - name: Dedicated sparse 3 GiB / 4K Chromium structural lifecycle
-        env:
-          VIDEOFLOW_LARGE_MEDIA_CERT: "1"
-        run: npx playwright test tests/e2e/large-media.spec.ts --project=chromium --reporter=line
-      - name: Generate certification from actual runner evidence
-        run: node scripts/finalize-ci-certification.mjs
-      - name: Stage static Pages artifact
-        run: |
-          rm -rf .pages-dist
-          if [ -f dist/client/index.html ]; then
-            cp -a dist/client .pages-dist
-          else
-            cp -a dist .pages-dist
-          fi
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: .pages-dist
-
   deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-24.04
-    needs: release-gate
     steps:
-      - name: Deploy
+      - name: Download artifact from the successful release gate
+        uses: actions/download-artifact@v4
+        with:
+          name: videoflow-static-site
+          path: .pages-dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .pages-dist
+      - name: Deploy the exact certified build
         id: deployment
         uses: actions/deploy-pages@v4

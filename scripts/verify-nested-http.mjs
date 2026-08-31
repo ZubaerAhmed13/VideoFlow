@@ -29,14 +29,19 @@ try {
   const results = [];
   for (const path of paths) {
     const response = await fetch(new URL(String(path).replace(/^\.\//, ""), base));
-    results.push({ path, status: response.status, type: response.headers.get("content-type") });
-    await response.body?.cancel();
+    const wasm = String(path).endsWith(".wasm");
+    const magic = wasm ? [...new Uint8Array(await response.arrayBuffer()).subarray(0, 4)] : undefined;
+    results.push({ path, status: response.status, type: response.headers.get("content-type"), magic });
+    if (!wasm) await response.body?.cancel();
   }
   const failed = results.filter((result) => result.status !== 200);
   if (failed.length) throw new Error(`Nested-path assets failed: ${JSON.stringify(failed)}`);
   const wasm = results.filter((result) => String(result.path).endsWith(".wasm"));
   if (!wasm.length || wasm.some((result) => result.type !== "application/wasm")) {
     throw new Error("Nested-path WASM assets have an invalid MIME type.");
+  }
+  if (wasm.some((result) => JSON.stringify(result.magic) !== JSON.stringify([0, 97, 115, 109]))) {
+    throw new Error("Nested-path WASM response did not contain WebAssembly bytes.");
   }
   console.log(`Nested HTTP verification passed: ${results.length} production assets under /VideoFlow/.`);
 } finally {

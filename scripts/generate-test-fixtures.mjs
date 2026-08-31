@@ -43,8 +43,10 @@ if (!existsSync(videoWebm)) {
     [
       "-hide_banner", "-loglevel", "error", "-y",
       "-i", video,
-      "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-crf", "38", "-b:v", "0",
-      "-c:a", "libopus", "-b:a", "96k",
+      // Playwright Firefox's Linux build reliably decodes baseline WebM.
+      // VP9/Opus availability depends on runner codecs and can stall metadata.
+      "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-crf", "30", "-b:v", "0",
+      "-c:a", "libvorbis", "-q:a", "4",
       videoWebm,
     ],
     { encoding: "utf8" },
@@ -136,7 +138,7 @@ function generate(path, args) {
 }
 
 generate(aiStatic, ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=2", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-vf", "drawbox=x=900:y=50:w=260:h=80:color=white@0.85:t=fill,drawtext=text='VF TEST':x=935:y=72:fontsize=34:fontcolor=black", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"]);
-generate(aiStaticWebm, ["-i", aiStatic, "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-crf", "38", "-b:v", "0", "-c:a", "libopus", "-b:a", "96k"]);
+generate(aiStaticWebm, ["-i", aiStatic, "-c:v", "libvpx", "-deadline", "realtime", "-cpu-used", "8", "-crf", "30", "-b:v", "0", "-c:a", "libvorbis", "-q:a", "4"]);
 generate(aiMoving, [
   "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=2",
   "-f", "lavfi", "-i", "color=c=white@0.85:size=220x70:rate=24:duration=2,format=yuva420p,drawtext=text='MOVE':x=25:y=18:fontsize=30:fontcolor=black",

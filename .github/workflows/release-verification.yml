@@ -67,6 +67,14 @@ jobs:
         run: node scripts/finalize-ci-certification.mjs
       - name: Package certified AI release
         run: npm run package:release
+      - name: Stage certified static Pages artifact
+        run: |
+          rm -rf .pages-dist
+          if [ -f dist/client/index.html ]; then
+            cp -a dist/client .pages-dist
+          else
+            cp -a dist .pages-dist
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -87,5 +95,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: videoflow-static-site
-          path: dist
+          path: .pages-dist
           if-no-files-found: error

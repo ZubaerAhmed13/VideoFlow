@@ -31,7 +31,15 @@ createServer((request, response) => {
     return;
   }
   if (existsSync(target) && statSync(target).isDirectory()) target = join(target, "index.html");
-  if (!existsSync(target)) target = join(root, "index.html");
+  if (!existsSync(target)) {
+    const acceptsHtml = String(request.headers.accept ?? "").includes("text/html");
+    const navigationRoute = acceptsHtml && !extname(pathname);
+    if (navigationRoute) target = join(root, "index.html");
+    else {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
+      return;
+    }
+  }
   response.writeHead(200, {
     "Content-Type": mime[extname(target)] ?? "application/octet-stream",
     "Cache-Control": "no-cache",

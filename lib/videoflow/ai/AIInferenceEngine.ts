@@ -7,7 +7,7 @@ import { deploymentAssetUrl } from "../base-url";
 
 type OrtTensor = { data: Float32Array | Uint8Array; dims: readonly number[] };
 type OrtRuntime = {
-  env?: { wasm?: { numThreads?: number } };
+  env?: { wasm?: { numThreads?: number; wasmPaths?: string } };
   Tensor: new (type: string, data: Float32Array, dims: number[]) => OrtTensor;
   InferenceSession: { create(model: ArrayBuffer, options: { executionProviders: string[] }): Promise<{ inputNames?: string[]; outputNames?: string[]; run(feeds: Record<string, OrtTensor>): Promise<Record<string, { data: Float32Array | Uint8Array }>>; release?(): Promise<void> | void }> };
 };
@@ -16,7 +16,16 @@ let runtimePromise: Promise<OrtRuntime> | null = null;
 let sessionPromise: Promise<{ session: Awaited<ReturnType<OrtRuntime["InferenceSession"]["create"]>>; provider: AIProvider }> | null = null;
 
 async function loadRuntime(): Promise<OrtRuntime> {
-  if (!runtimePromise) runtimePromise = import(/* @vite-ignore */ deploymentAssetUrl("vendor/onnx/ort.webgpu.bundle.min.mjs")) as Promise<OrtRuntime>;
+  if (!runtimePromise) {
+    runtimePromise = (import(/* @vite-ignore */ deploymentAssetUrl("vendor/onnx/ort.webgpu.bundle.min.mjs")) as Promise<OrtRuntime>)
+      .then((runtime) => {
+        // ONNX Runtime otherwise derives its companion .mjs/.wasm URLs from
+        // the generated application chunk. On a nested SPA host that request
+        // can resolve to index.html, which then fails WASM magic validation.
+        if (runtime.env?.wasm) runtime.env.wasm.wasmPaths = deploymentAssetUrl("vendor/onnx/");
+        return runtime;
+      });
+  }
   return runtimePromise;
 }
 

@@ -3,7 +3,7 @@
 type Provider = "webgpu" | "wasm";
 type OrtTensor = { data: Float32Array | Uint8Array; dims: readonly number[] };
 type OrtRuntime = {
-  env?: { wasm?: { numThreads?: number } };
+  env?: { wasm?: { numThreads?: number; wasmPaths?: string } };
   Tensor: new (type: string, data: Float32Array, dims: number[]) => OrtTensor;
   InferenceSession: { create(model: ArrayBuffer, options: { executionProviders: string[] }): Promise<{ inputNames?: string[]; outputNames?: string[]; run(feeds: Record<string, OrtTensor>): Promise<Record<string, { data: Float32Array | Uint8Array }>>; release?(): Promise<void> | void }> };
 };
@@ -21,6 +21,7 @@ type InitRequest = {
   id: number;
   type: "init";
   runtimeUrl: string;
+  wasmBaseUrl: string;
   model: ArrayBuffer;
   providers: string[];
   hardwareConcurrency?: number;
@@ -42,7 +43,10 @@ type WorkerRequest = InitRequest | InferRequest | DisposeRequest;
 
 async function init(data: InitRequest) {
   runtime = await import(/* @vite-ignore */ data.runtimeUrl) as OrtRuntime;
-  if (runtime.env?.wasm) runtime.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, data.hardwareConcurrency || 2)) : 1;
+  if (runtime.env?.wasm) {
+    runtime.env.wasm.wasmPaths = data.wasmBaseUrl;
+    runtime.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(4, data.hardwareConcurrency || 2)) : 1;
+  }
   imageInput = data.imageInput;
   maskInput = data.maskInput;
   outputName = data.outputName;

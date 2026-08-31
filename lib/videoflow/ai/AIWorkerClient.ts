@@ -55,6 +55,7 @@ async function initialize(settings: AISettings): Promise<AIProvider> {
     const providers = requested === "webgpu" && capability.webgpu === "available" ? ["webgpu", "wasm"] : ["wasm"];
     const reply = await request("init", {
       runtimeUrl: deploymentAssetUrl("vendor/onnx/ort.webgpu.bundle.min.mjs"),
+      wasmBaseUrl: deploymentAssetUrl("vendor/onnx/"),
       model,
       providers,
       hardwareConcurrency: navigator.hardwareConcurrency || 2,
