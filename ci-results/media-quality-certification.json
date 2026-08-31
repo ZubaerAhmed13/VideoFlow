@@ -1,0 +1,141 @@
+{
+  "generatedAt": "2026-08-31T09:16:58.152Z",
+  "runner": "linux",
+  "resolutions": {
+    "480p": {
+      "status": "PASS",
+      "width": 854,
+      "height": 480
+    },
+    "720p": {
+      "status": "PASS",
+      "width": 1280,
+      "height": 720
+    },
+    "1080p": {
+      "status": "PASS",
+      "width": 1920,
+      "height": 1080
+    },
+    "1440p": {
+      "status": "PASS",
+      "width": 2560,
+      "height": 1440
+    },
+    "2K DCI": {
+      "status": "PASS",
+      "width": 2048,
+      "height": 1080
+    },
+    "4K UHD": {
+      "status": "PASS",
+      "width": 3840,
+      "height": 2160
+    },
+    "4K DCI": {
+      "status": "PASS",
+      "width": 4096,
+      "height": 2160
+    }
+  },
+  "frameRates": {
+    "24": {
+      "status": "PASS",
+      "expected": 24,
+      "actual": 24
+    },
+    "25": {
+      "status": "PASS",
+      "expected": 25,
+      "actual": 25
+    },
+    "30": {
+      "status": "PASS",
+      "expected": 30,
+      "actual": 30
+    },
+    "50": {
+      "status": "PASS",
+      "expected": 50,
+      "actual": 50
+    },
+    "60": {
+      "status": "PASS",
+      "expected": 60,
+      "actual": 60
+    },
+    "23.976": {
+      "status": "PASS",
+      "expected": 23.976023976023978,
+      "actual": 23.976023976023978
+    },
+    "29.97": {
+      "status": "PASS",
+      "expected": 29.97002997002997,
+      "actual": 29.97002997002997
+    },
+    "59.94": {
+      "status": "PASS",
+      "expected": 59.94005994005994,
+      "actual": 59.94005994005994
+    }
+  },
+  "colour": {
+    "Rec.709 Limited": {
+      "status": "PASS",
+      "primaries": "bt709",
+      "transfer": "bt709",
+      "matrix": "bt709",
+      "range": "tv"
+    },
+    "Rec.709 Full": {
+      "status": "PASS",
+      "primaries": "bt709",
+      "transfer": "bt709",
+      "matrix": "bt709",
+      "range": "pc"
+    }
+  },
+  "quality": {
+    "status": "PASS",
+    "modes": {
+      "Visually Lossless": {
+        "status": "PASS",
+        "codec": "H.264 CRF 14 slow",
+        "psnr": 50.591787,
+        "ssim": 0.998133
+      },
+      "High Quality": {
+        "status": "PASS",
+        "codec": "H.264 CRF 18 medium",
+        "psnr": 50.452056,
+        "ssim": 0.997941
+      },
+      "Balanced": {
+        "status": "PASS",
+        "codec": "H.264 CRF 21 medium",
+        "psnr": 50.20319,
+        "ssim": 0.997788
+      },
+      "Smaller File": {
+        "status": "PASS",
+        "codec": "H.264 CRF 26 medium",
+        "psnr": 49.973288,
+        "ssim": 0.997686
+      }
+    },
+    "smartCopy": {
+      "status": "PASS",
+      "videoStreamSha256Identical": true
+    },
+    "note": "Objective metrics supplement, but do not replace, visual review."
+  },
+  "audio": {
+    "status": "PASS",
+    "sampleRate": 48000,
+    "channels": 2,
+    "bitrate": 226939,
+    "durationDeltaSeconds": 0.03136699999999992
+  },
+  "status": "PASS"
+}

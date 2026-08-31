@@ -1,0 +1,91 @@
+name: VideoFlow AI release verification
+
+on:
+  push:
+    branches: [main, ai-final-certification]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore checksum-pinned split release assets
+        run: npm run restore:large-assets -- --if-present
+      - name: Install dependencies
+        run: npm ci
+      - name: Install native fixture dependency
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Generate deterministic fixtures
+        run: npm run fixtures
+      - name: Stage checksum-pinned local AI pack
+        run: bash scripts/stage-ai-pack-ci.sh
+      - name: Security source gate
+        run: npm run verify:security
+      - name: TypeScript
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npm run lint
+      - name: Render-plan verification
+        run: npm run verify:render
+      - name: Fresh production build
+        run: |
+          rm -rf dist
+          npm run build
+      - name: Static distribution verification
+        env:
+          VIDEOFLOW_REQUIRE_AI_PACK: "1"
+        run: npm run verify:dist
+      - name: Packaged nested-path verification
+        run: npm run verify:nested
+      - name: Unit, architecture, static-dist and fragmented-media tests
+        run: |
+          mkdir -p ci-results
+          npm run test:unit | tee ci-results/unit.log
+      - name: Media quality and colour fidelity gate
+        run: npm run cert:quality
+      - name: Checksum-pinned local AI inference gate
+        run: npm run cert:ai:wasm
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Chromium / Firefox / WebKit E2E
+        run: npm run test:e2e
+      - name: Dedicated sparse 3 GiB / 4K Chromium structural lifecycle
+        env:
+          VIDEOFLOW_LARGE_MEDIA_CERT: "1"
+        run: npx playwright test tests/e2e/large-media.spec.ts --project=chromium --reporter=line
+      - name: Generate certification from actual runner evidence
+        run: node scripts/finalize-ci-certification.mjs
+      - name: Package certified AI release
+        run: npm run package:release
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: certification-evidence
+          path: ci-results
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: videoflow-ai-release
+          path: VideoFlow_Professional_Core_1.0.0_Final_Release.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: videoflow-static-site
+          path: dist
+          if-no-files-found: error

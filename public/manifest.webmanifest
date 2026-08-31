@@ -1,0 +1,14 @@
+{
+  "name": "VideoFlow Professional Core",
+  "short_name": "VideoFlow",
+  "description": "Privacy-first, non-destructive video and audio editing in your browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a0d12",
+  "theme_color": "#0e131a",
+  "orientation": "any",
+  "icons": [
+    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

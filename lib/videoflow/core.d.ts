@@ -1,0 +1,21 @@
+import type { Clip, KeyframeProperty, PropertyKeyframe, VideoFlowProject, WatermarkMask } from "./types";
+
+export function clamp(value: number, min: number, max: number): number;
+export function uid(prefix?: string): string;
+export function clipDuration(clip: Pick<Clip, "sourceEnd" | "sourceStart" | "speed">): number;
+export function projectDuration(project: { clips: Array<Pick<Clip, "timelineStart" | "sourceEnd" | "sourceStart" | "speed">> }): number;
+export function formatTime(seconds: number, milliseconds?: boolean): string;
+export function parseTime(value: string | number): number | null;
+export function snapTime(value: number, points: number[], threshold: number): number;
+export function normalizeCrop(crop: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number };
+export function interpolateKeyframes<T extends number | Record<string, number>>(keyframes: Array<{ time: number; value: T }>, time: number): T | null;
+export function resolveWatermarkMask(mask: WatermarkMask, time: number): WatermarkMask;
+export function upsertWatermarkKeyframe(mask: WatermarkMask, time: number, patch?: Partial<Pick<WatermarkMask, "x" | "y" | "width" | "height">>): WatermarkMask;
+export function resolvePropertyKeyframes(keyframes: PropertyKeyframe[] | undefined, property: KeyframeProperty, time: number, fallback: number): number;
+export function resolveClipState(clip: Clip, time: number): Clip;
+export function upsertPropertyKeyframe(clip: Clip, property: KeyframeProperty, time: number, value: number): Clip;
+export function isTrackAudible(project: VideoFlowProject, trackId: string): boolean;
+export function parseSrt(text: string): Array<{ id: string; start: number; end: number; text: string }>;
+export function cuesToSrt(cues: Array<{ start: number; end: number; text: string }>): string;
+export function serializeProject(project: VideoFlowProject): string;
+export function migrateProject(input: unknown): VideoFlowProject;
