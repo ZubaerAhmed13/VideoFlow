@@ -270,7 +270,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       <label>ROI padding<input type="number" min={16} max={256} value={settings.roiPadding} onChange={(event) => patchAI({ roiPadding: Number(event.target.value) })}/></label>
     </div>
     <div className="vf-button-grid">
-      <Button size="sm" disabled={busy || record.state === "not-installed" || !runtimeReady} onClick={() => void previewCurrent()}>{busy ? <LoaderCircle className="animate-spin"/> : <Sparkles/>} Current frame</Button>
+      <Button aria-label="Run AI preview" size="sm" disabled={busy || record.state === "not-installed" || !runtimeReady} onClick={() => void previewCurrent()}>{busy ? <LoaderCircle className="animate-spin"/> : <Sparkles/>} Current frame</Button>
       {[2, 5, 10].map((seconds) => <Button key={seconds} variant="outline" size="sm" disabled={busy || record.state === "not-installed" || !runtimeReady} onClick={() => void previewSegment(seconds)}>{seconds} sec</Button>)}
     </div>
     <div className="vf-button-grid">

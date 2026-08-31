@@ -1770,6 +1770,10 @@ button {
 }
 .vf-export-dialog {
   max-width: 720px !important;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: #141a22 !important;
   border-color: #303a47 !important;
   color: #e6edf4 !important;

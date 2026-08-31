@@ -27,3 +27,15 @@ test("Firefox browser matrix uses generated VP9 Opus fixtures", async () => {
   assert.match(e2e, /firefoxFixture/);
   assert.match(e2e, /firefoxAI/);
 });
+
+
+test("release dialogs and cross-browser imports remain bounded", async () => {
+  assert.match(await read("app/globals.css"), /\.vf-export-dialog[\s\S]*max-height: calc\(100dvh - 32px\)[\s\S]*overflow-y: auto/);
+  assert.match(await read("lib/videoflow/media.ts"), /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
+  assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
+});
+
+test("moving-watermark certification fixture uses a true time expression", async () => {
+  const fixtures = await read("scripts/generate-test-fixtures.mjs");
+  assert.match(fixtures, /overlay=x='100\+300\*t':y='70\+80\*t'/);
+});

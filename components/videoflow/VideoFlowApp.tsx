@@ -2261,7 +2261,9 @@ export function VideoFlowApp() {
           setPast((items) => [...items.slice(-49), project]);
           setFuture([]);
           setProject(quickProject);
-          setSelectedId(quickProject.clips[0]?.id ?? null);
+          // Quick workflows place the generated overlay/effect clip last. Select
+          // that result so the editor opens on the property the user just made.
+          setSelectedId(quickProject.clips.at(-1)?.id ?? null);
           setPlayhead(0);
           setView("editor");
         }}

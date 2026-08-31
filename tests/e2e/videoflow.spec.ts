@@ -317,14 +317,14 @@ test("bundled AI executes a genuine local neural preview with tracking and offli
   await bundled.click();
   await expect(page.getByText(/checksum verified/i)).toBeVisible({ timeout: 120_000 });
   await page.getByLabel("Region 1 method").selectOption("ai");
-  await page.getByRole("button", { name: /Current frame/i }).click();
+  await page.getByRole("button", { name: /Run AI preview/i }).click();
   await expect(page.locator(".vf-ai-preview")).toBeVisible({ timeout: 180_000 });
   const inferenceEvidence = await page.getByText(/inference.*ROI/i).textContent();
   expect(inferenceEvidence).toBeTruthy();
   recordBrowserEvidence({ browserName, stage: "ai-inference", detail: inferenceEvidence });
   await page.evaluate(() => window.__videoFlowForceAIWorkerCrashForTest?.());
   await page.getByLabel("ROI padding").fill("97");
-  await page.getByRole("button", { name: /Current frame/i }).click();
+  await page.getByRole("button", { name: /Run AI preview/i }).click();
   await expect(page.locator(".vf-ai-preview")).toBeVisible({ timeout: 180_000 });
   await expect(page.getByText(/inference.*ROI/i)).toBeVisible();
   await page.getByRole("button", { name: /Track Forward/i }).click();
@@ -339,7 +339,7 @@ test("bundled AI executes a genuine local neural preview with tracking and offli
   await page.locator(".vf-project-grid article button").first().click();
   await page.locator(".vf-clip-video").first().click();
   await expect(page.getByText(/LaMa 512 INT8/)).toBeVisible();
-  await page.getByRole("button", { name: /Current frame/i }).click();
+  await page.getByRole("button", { name: /Run AI preview/i }).click();
   await expect(page.locator(".vf-ai-preview")).toBeVisible({ timeout: 180_000 });
   expect(externalRequests).toEqual([]);
   await context.setOffline(false);
@@ -417,7 +417,7 @@ test("Chromium produces a real 3840x2160 AI-assisted output", async ({ page, bro
   await page.getByRole("button", { name: /Install bundled AI/i }).click();
   await expect(page.getByText(/checksum verified/i)).toBeVisible({ timeout: 120_000 });
   await page.getByLabel("Region 1 method").selectOption("ai");
-  await page.getByRole("button", { name: /Current frame/i }).click();
+  await page.getByRole("button", { name: /Run AI preview/i }).click();
   await expect(page.locator(".vf-ai-preview")).toBeVisible({ timeout: 180_000 });
   await expect(page.getByText(/ROI/i).last()).toBeVisible();
   await queueMp4(page, "youtube-4k");

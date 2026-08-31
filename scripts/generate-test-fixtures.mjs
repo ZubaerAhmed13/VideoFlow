@@ -137,7 +137,12 @@ function generate(path, args) {
 
 generate(aiStatic, ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=2", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2", "-vf", "drawbox=x=900:y=50:w=260:h=80:color=white@0.85:t=fill,drawtext=text='VF TEST':x=935:y=72:fontsize=34:fontcolor=black", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"]);
 generate(aiStaticWebm, ["-i", aiStatic, "-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-crf", "38", "-b:v", "0", "-c:a", "libopus", "-b:a", "96k"]);
-generate(aiMoving, ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=2", "-vf", "drawbox=x='100+300*t':y='70+80*t':w=220:h=70:color=white@0.85:t=fill,drawtext=text='MOVE':x='125+300*t':y='88+80*t':fontsize=30:fontcolor=black", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p"]);
+generate(aiMoving, [
+  "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=2",
+  "-f", "lavfi", "-i", "color=c=white@0.85:size=220x70:rate=24:duration=2,format=yuva420p,drawtext=text='MOVE':x=25:y=18:fontsize=30:fontcolor=black",
+  "-filter_complex", "[0:v][1:v]overlay=x='100+300*t':y='70+80*t':shortest=1",
+  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "24", "-pix_fmt", "yuv420p",
+]);
 generate(ai4k, ["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=24:duration=1", "-vf", "drawbox=x=3150:y=120:w=420:h=130:color=white@0.85:t=fill,drawtext=text='4K TEST':x=3220:y=155:fontsize=54:fontcolor=black", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-pix_fmt", "yuv420p"]);
 generate(aiClean, ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=1:duration=1", "-frames:v", "1"]);
 

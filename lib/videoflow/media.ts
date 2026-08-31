@@ -54,6 +54,26 @@ function kindForFile(file: File, signature: string): MediaKind | null {
   return null;
 }
 
+const OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000;
+
+async function optionalTechnicalProbe(file: File): Promise<MediaProbe | undefined> {
+  const { probeMediaBlob } = await import("./ffmpeg");
+  let timer = 0;
+  try {
+    return await Promise.race([
+      probeMediaBlob(file, file.name),
+      new Promise<never>((_, reject) => {
+        timer = window.setTimeout(
+          () => reject(new Error("Optional technical metadata probe timed out.")),
+          OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+}
+
 function loadElementMetadata(file: File, kind: MediaKind, url: string): Promise<{ duration: number; width: number; height: number }> {
   if (kind === "subtitle") return Promise.resolve({ duration: 0, width: 0, height: 0 });
   return new Promise((resolve, reject) => {
@@ -148,10 +168,10 @@ export async function inspectFile(
     }
     if ((kind === "video" || kind === "audio") && !probe) {
       try {
-        const { probeMediaBlob } = await import("./ffmpeg");
-        probe = await probeMediaBlob(file, file.name);
+        probe = await optionalTechnicalProbe(file);
       } catch {
         // Browser metadata remains usable. Unknown technical metadata is never fabricated.
+        // Import must not wait indefinitely for optional FFmpeg probing on slower engines.
       }
     }
     const videoStream = probe?.streams.find((stream) => stream.codec_type === "video");
