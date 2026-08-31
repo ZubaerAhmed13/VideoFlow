@@ -37,6 +37,14 @@ test("nested browser runtimes resolve local ESM and WASM companions explicitly",
   }
 });
 
+test("browser FFprobe calls use the explicit input flag required by ffmpeg.wasm", async () => {
+  const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
+  assert.equal(
+    [...ffmpeg.matchAll(/"-i",\s*(?:filename|mounted\.path)/g)].length,
+    2,
+  );
+});
+
 test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {
   const fixtures = await read("scripts/generate-test-fixtures.mjs");
   const e2e = await read("tests/e2e/videoflow.spec.ts");
