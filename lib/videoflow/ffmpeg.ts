@@ -491,7 +491,7 @@ async function probeWrittenFile(
   const outputName = uniqueName("render-probe", "json");
   try {
     const exitCode = await instance.ffprobe(
-      ["-v", "error", "-show_streams", "-show_format", "-of", "json", "-i", filename, "-o", outputName],
+      ["-v", "error", "-i", filename, "-show_streams", "-show_format", "-of", "json", "-o", outputName],
       -1,
       { signal },
     );
@@ -688,12 +688,12 @@ export async function probeMediaBlob(
         [
           "-v",
           "error",
+          "-i",
+          mounted.path,
           "-show_streams",
           "-show_format",
           "-of",
           "json",
-          "-i",
-          mounted.path,
           "-o",
           outputName,
         ],

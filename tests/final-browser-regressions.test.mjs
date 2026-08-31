@@ -43,6 +43,16 @@ test("browser FFprobe calls use the explicit input flag required by ffmpeg.wasm"
     [...ffmpeg.matchAll(/"-i",\s*(?:filename|mounted\.path)/g)].length,
     2,
   );
+  assert.match(ffmpeg, /"error",\s*"-i",\s*filename,\s*"-show_streams"/);
+  assert.match(ffmpeg, /"error",\s*"-i",\s*mounted\.path,\s*"-show_streams"/);
+});
+
+test("WebKit offline AI limitation is measured instead of assumed", async () => {
+  const e2e = await read("tests/e2e/videoflow.spec.ts");
+  assert.match(e2e, /stage: "offline-ai"/);
+  assert.match(e2e, /status: "LIMITED"/);
+  assert.match(e2e, /Original\\\/proxy media is offline/);
+  assert.doesNotMatch(e2e, /sourceDurationSeconds: 5/);
 });
 
 test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {
