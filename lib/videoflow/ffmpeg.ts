@@ -81,6 +81,16 @@ type ProgressCallback = (progress: number, phase: string) => void;
 let ffmpeg: FFmpeg | null = null;
 let loadPromise: Promise<FFmpeg> | null = null;
 const WORKER_FS = "WORKERFS" as FFFSType;
+// Small inputs are more reliably probed from MEMFS in all three browser
+// engines. Larger media must stay blob-backed so reference workflows never
+// copy a multi-gigabyte source into the WebAssembly heap.
+const MEMFS_INPUT_LIMIT_BYTES = 64 * 1024 * 1024;
+
+interface StagedInput {
+  path: string;
+  mountPoint: string | null;
+  temporaryFile: string | null;
+}
 
 const safeExtension = (name: string) =>
   name.toLowerCase().match(/\.([a-z0-9]{1,8})$/)?.[1] ?? "bin";
@@ -142,21 +152,51 @@ async function mountInput(
   instance: FFmpeg,
   blob: Blob,
   sourceName: string,
-): Promise<{ path: string; mountPoint: string }> {
+  signal?: AbortSignal,
+): Promise<StagedInput> {
+  const extension = safeExtension(sourceName);
+  if (blob.size <= MEMFS_INPUT_LIMIT_BYTES) {
+    const temporaryFile = uniqueName("input", extension);
+    await instance.writeFile(
+      temporaryFile,
+      new Uint8Array(await blob.arrayBuffer()),
+      signal ? { signal } : undefined,
+    );
+    return { path: temporaryFile, mountPoint: null, temporaryFile };
+  }
   const mountPoint = `/input-${crypto.randomUUID()}`;
-  const filename = `source.${safeExtension(sourceName)}`;
+  const filename = `source.${extension}`;
+  const sourceFile = blob instanceof File && blob.name === filename
+    ? blob
+    : new File([blob], filename, { type: blob.type });
   await instance.createDir(mountPoint);
   try {
-    await instance.mount(
-      WORKER_FS,
-      { blobs: [{ name: filename, data: blob }] },
+    // `files` is the documented WORKERFS mount form. A File wraps the source
+    // Blob without materialising its contents as a Uint8Array.
+    await instance.mount(WORKER_FS, { files: [sourceFile] }, mountPoint);
+    return {
+      path: `${mountPoint}/${filename}`,
       mountPoint,
-    );
-    return { path: `${mountPoint}/${filename}`, mountPoint };
+      temporaryFile: null,
+    };
   } catch (error) {
     await instance.deleteDir(mountPoint).catch(() => false);
     throw error;
   }
+}
+
+async function cleanupStagedInputs(
+  instance: FFmpeg,
+  inputs: StagedInput[],
+): Promise<void> {
+  await deleteQuietly(
+    instance,
+    inputs.flatMap((input) => input.temporaryFile ? [input.temporaryFile] : []),
+  );
+  await unmountQuietly(
+    instance,
+    inputs.flatMap((input) => input.mountPoint ? [input.mountPoint] : []),
+  );
 }
 
 async function unmountQuietly(instance: FFmpeg, mountPoints: string[]): Promise<void> {
@@ -180,7 +220,7 @@ async function executeWithInput(
       throw new DOMException("Processing cancelled.", "AbortError");
     const instance = await getFfmpeg(onProgress);
     const outputName = uniqueName("output", outputExtension);
-    let mountPoint: string | null = null;
+    let stagedInput: StagedInput | null = null;
     const logs: string[] = [];
     const progressListener = ({ progress }: { progress: number }) =>
       onProgress?.(
@@ -203,8 +243,8 @@ async function executeWithInput(
     instance.on("log", logListener);
     try {
       onProgress?.(0.03, "Preparing local media");
-      const mounted = await mountInput(instance, blob, sourceName);
-      mountPoint = mounted.mountPoint;
+      const mounted = await mountInput(instance, blob, sourceName, signal);
+      stagedInput = mounted;
       const exitCode = await instance.exec(
         buildArgs(mounted.path, outputName),
         -1,
@@ -231,7 +271,7 @@ async function executeWithInput(
       instance.off("log", logListener);
       if (instance.loaded) {
         await deleteQuietly(instance, [outputName]);
-        if (mountPoint) await unmountQuietly(instance, [mountPoint]);
+        if (stagedInput) await cleanupStagedInputs(instance, [stagedInput]);
       }
     }
   });
@@ -491,7 +531,7 @@ async function renderTimelineInternal(
     if (signal.aborted) throw new DOMException("Export cancelled.", "AbortError");
     const instance = await getFfmpeg(onProgress);
     const createdFiles: string[] = [];
-    const mountedInputs: string[] = [];
+    const stagedInputs: StagedInput[] = [];
     const inputs: Array<{
       id: string;
       filename: string;
@@ -543,9 +583,9 @@ async function renderTimelineInternal(
           await instance.writeFile(filename, new Uint8Array(await sourceBlob.arrayBuffer()), { signal });
           createdFiles.push(filename);
         } else {
-          const mounted = await mountInput(instance, sourceBlob, asset!.name);
+          const mounted = await mountInput(instance, sourceBlob, asset!.name, signal);
           filename = mounted.path;
-          mountedInputs.push(mounted.mountPoint);
+          stagedInputs.push(mounted);
         }
         if (generated || kind === "image") {
           inputs.push({ id: sourceId, filename, kind, hasVideo: true, hasAudio: false });
@@ -592,7 +632,7 @@ async function renderTimelineInternal(
       instance.off("log", logListener);
       if (instance.loaded) {
         await deleteQuietly(instance, createdFiles);
-        await unmountQuietly(instance, mountedInputs);
+        await cleanupStagedInputs(instance, stagedInputs);
       }
     }
   });
@@ -632,7 +672,7 @@ export async function probeMediaBlob(
       throw new DOMException("Media inspection cancelled.", "AbortError");
     const instance = await getFfmpeg();
     const outputName = uniqueName("probe", "json");
-    let mountPoint: string | null = null;
+    let stagedInput: StagedInput | null = null;
     const abort = () => {
       if (ffmpeg === instance) {
         instance.terminate();
@@ -642,8 +682,8 @@ export async function probeMediaBlob(
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
-      const mounted = await mountInput(instance, blob, sourceName);
-      mountPoint = mounted.mountPoint;
+      const mounted = await mountInput(instance, blob, sourceName, signal);
+      stagedInput = mounted;
       const exitCode = await instance.ffprobe(
         [
           "-v",
@@ -669,7 +709,7 @@ export async function probeMediaBlob(
       signal.removeEventListener("abort", abort);
       if (instance.loaded) {
         await deleteQuietly(instance, [outputName]);
-        if (mountPoint) await unmountQuietly(instance, [mountPoint]);
+        if (stagedInput) await cleanupStagedInputs(instance, [stagedInput]);
       }
     }
   });

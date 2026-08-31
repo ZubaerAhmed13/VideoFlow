@@ -4,23 +4,19 @@ import test from "node:test";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("large media is mounted into FFmpeg without whole-file memory copies", async () => {
+test("small media uses reliable MEMFS while large media remains blob-backed WORKERFS", async () => {
   const [media, ffmpeg] = await Promise.all([
     read("lib/videoflow/media.ts"),
     read("lib/videoflow/ffmpeg.ts"),
   ]);
   assert.doesNotMatch(media, /1 GB browser safety limit|MAX_FILE_SIZE/);
+  assert.match(ffmpeg, /MEMFS_INPUT_LIMIT_BYTES = 64 \* 1024 \* 1024/);
+  assert.match(ffmpeg, /blob\.size <= MEMFS_INPUT_LIMIT_BYTES/);
   assert.match(ffmpeg, /WORKERFS/);
+  assert.match(ffmpeg, /\{ files: \[sourceFile\] \}/);
   assert.match(ffmpeg, /mountInput\(instance, sourceBlob/);
-  assert.equal(
-    [...ffmpeg.matchAll(/sourceBlob\.arrayBuffer\(\)/g)].length,
-    1,
-    "only generated overlays should be copied into FFmpeg memory",
-  );
-  assert.match(
-    ffmpeg,
-    /if \(generated\) \{[\s\S]*?sourceBlob\.arrayBuffer\(\)/,
-  );
+  assert.match(ffmpeg, /new File\(\[blob\], filename/);
+  assert.match(ffmpeg, /without materialising its contents as a Uint8Array/);
 });
 
 test("desktop panels and mobile pages each have a valid scroll owner", async () => {

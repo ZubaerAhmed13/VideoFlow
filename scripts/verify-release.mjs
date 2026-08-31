@@ -39,13 +39,19 @@ if (requireAI) {
     "models/lama-512-int8.onnx",
     "models/lama-512-int8.model.json",
     "vendor/onnx/ort.webgpu.bundle.min.mjs",
+    "vendor/onnx/ort-wasm-simd-threaded.asyncify.mjs",
+    "vendor/onnx/ort-wasm-simd-threaded.asyncify.wasm",
     "vendor/onnx/ort-wasm-simd-threaded.jsep.mjs",
     "vendor/onnx/ort-wasm-simd-threaded.jsep.wasm",
+    "vendor/onnx/ort-wasm-simd-threaded.jspi.mjs",
+    "vendor/onnx/ort-wasm-simd-threaded.jspi.wasm",
     "vendor/onnx/ort-wasm-simd-threaded.mjs",
     "vendor/onnx/ort-wasm-simd-threaded.wasm",
   ];
   for (const name of aiRequired) assert.ok(existsSync(join(output, name)), `Missing AI release asset: ${name}`);
-  assertWasmMagic("vendor/onnx/ort-wasm-simd-threaded.jsep.wasm");
+  for (const name of ["asyncify", "jsep", "jspi"]) {
+    assertWasmMagic(`vendor/onnx/ort-wasm-simd-threaded.${name}.wasm`);
+  }
   assertWasmMagic("vendor/onnx/ort-wasm-simd-threaded.wasm");
   const modelBytes = readFileSync(join(output, "models/lama-512-int8.onnx"));
   const modelSha = createHash("sha256").update(modelBytes).digest("hex");

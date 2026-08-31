@@ -27,6 +27,14 @@ test("nested browser runtimes resolve local ESM and WASM companions explicitly",
   assert.match(await read("workers/ai-inference.worker.ts"), /runtime\.env\.wasm\.wasmPaths = data\.wasmBaseUrl/);
   assert.match(await read("scripts/verify-release.mjs"), /export default createFFmpegCore/);
   assert.match(await read("scripts/verify-nested-http.mjs"), /WebAssembly bytes/);
+  const staging = await read("scripts/stage-ai-pack-ci.sh");
+  const installer = await read("lib/videoflow/ai/AIRuntimeInstaller.ts");
+  for (const variant of ["asyncify", "jsep", "jspi"]) {
+    assert.match(staging, new RegExp(`ort-wasm-simd-threaded\\.${variant}\\.mjs`));
+    assert.match(staging, new RegExp(`ort-wasm-simd-threaded\\.${variant}\\.wasm`));
+    assert.match(installer, new RegExp(`ort-wasm-simd-threaded\\.${variant}\\.mjs`));
+    assert.match(installer, new RegExp(`ort-wasm-simd-threaded\\.${variant}\\.wasm`));
+  }
 });
 
 test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {

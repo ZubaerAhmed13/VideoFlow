@@ -20,8 +20,12 @@ fi
 runtime_is_complete=1
 for name in \
   ort.webgpu.bundle.min.mjs \
+  ort-wasm-simd-threaded.asyncify.mjs \
+  ort-wasm-simd-threaded.asyncify.wasm \
   ort-wasm-simd-threaded.jsep.mjs \
   ort-wasm-simd-threaded.jsep.wasm \
+  ort-wasm-simd-threaded.jspi.mjs \
+  ort-wasm-simd-threaded.jspi.wasm \
   ort-wasm-simd-threaded.mjs \
   ort-wasm-simd-threaded.wasm
 do
@@ -39,8 +43,12 @@ else
   )
   for name in \
     ort.webgpu.bundle.min.mjs \
+    ort-wasm-simd-threaded.asyncify.mjs \
+    ort-wasm-simd-threaded.asyncify.wasm \
     ort-wasm-simd-threaded.jsep.mjs \
     ort-wasm-simd-threaded.jsep.wasm \
+    ort-wasm-simd-threaded.jspi.mjs \
+    ort-wasm-simd-threaded.jspi.wasm \
     ort-wasm-simd-threaded.mjs \
     ort-wasm-simd-threaded.wasm
   do
