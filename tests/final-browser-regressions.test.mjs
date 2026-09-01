@@ -76,7 +76,11 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(media, /controller\.abort\(\)/);
   assert.match(media, /STORAGE_ESTIMATE_TIMEOUT_MS = 1_000/);
   assert.match(media, /const estimatePromise = navigator\.storage\?\.estimate\?\.\(\)/);
+  assert.match(media, /STORAGE_PERSISTENCE_TIMEOUT_MS = 1_000/);
+  assert.match(media, /const persistPromise = navigator\.storage\?\.persist\?\.\(\)/);
   assert.match(media, /estimateFreeDecision\.mode !== "persisted"/);
+  assert.match(media, /if \(!estimate\)[\s\S]*mode: "session" as const/);
+  assert.match(media, /if \(persistenceGranted === false\)[\s\S]*mode: "session" as const/);
   const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
   assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
   assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
