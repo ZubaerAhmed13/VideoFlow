@@ -41,7 +41,7 @@ jobs:
           new = '''replace(
               "components/videoflow/AISettingsPanel.tsx",
               '      const record = await installBundledAIModel();\\n      setModel(record);\\n      setStatus("Model installed locally and checksum verified.");',
-              '      const record = await installBundledAIModel();\\n      setModel(record);\\n      setStatus("AI model pack installed locally and both checksums verified.");',
+              '      const record = await installBundledAIModel();\\n      setModel(record);\\n      setStatus("AI model pack installed locally — checksum verified for both models.");',
           )'''
           if text.count(old) != 1:
               raise SystemExit(f"expected one generic bundled status transform, found {text.count(old)}")
