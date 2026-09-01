@@ -57,11 +57,25 @@ function waitForFramePresentation(video: HTMLVideoElement, signal?: AbortSignal)
 
 async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number, signal?: AbortSignal): Promise<void> {
   abortIfRequested(signal);
+  const durationLimit = Number.isFinite(video.duration) && video.duration > 0
+    ? Math.max(0, video.duration - 0.001)
+    : Math.max(0, target);
+  // Firefox can treat currentTime = 0 as a no-op before the first
+  // Ogg/Theora frame is decoded. Nudge the decoder by one millisecond
+  // only when the requested time already equals currentTime and no
+  // decoded frame data exists yet. The captured frame remains the
+  // source's first presentation frame and timeline timing is unchanged.
+  const decodeTarget =
+    video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
+    Math.abs(video.currentTime - target) <= 0.0005 &&
+    durationLimit > 0
+      ? Math.min(durationLimit, Math.max(0.001, target + 0.001))
+      : target;
   const ready = () =>
     video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
     video.videoWidth > 0 &&
     video.videoHeight > 0 &&
-    Math.abs(video.currentTime - target) <= 0.05;
+    Math.abs(video.currentTime - decodeTarget) <= 0.05;
   if (!ready()) {
     await new Promise<void>((resolve, reject) => {
       let timeout = 0;
@@ -89,8 +103,8 @@ async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number,
       video.addEventListener("error", onError, { once: true });
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
-        if (Math.abs(video.currentTime - target) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-          video.currentTime = target;
+        if (Math.abs(video.currentTime - decodeTarget) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
+video.currentTime = decodeTarget;
       } catch (error) {
         cleanup();
         reject(error);
@@ -101,7 +115,6 @@ async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number,
   }
   await waitForFramePresentation(video, signal);
 }
-
 async function frameAt(video: HTMLVideoElement, time: number, signal?: AbortSignal): Promise<ImageBitmap> {
   abortIfRequested(signal);
   const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Math.max(0, time);

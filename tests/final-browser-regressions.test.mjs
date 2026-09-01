@@ -89,6 +89,9 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
 assert.match(aiControls, /aria-label="Run AI preview"/);
 assert.match(aiControls, /FRAME_DECODE_TIMEOUT_MS = 8_000/);
 assert.match(aiControls, /FRAME_CAPTURE_RETRIES = 4/);
+assert.match(aiControls, /const decodeTarget =/);
+assert.match(aiControls, /Math\.max\(0\.001, target \+ 0\.001\)/);
+assert.match(aiControls, /video\.currentTime = decodeTarget/);
 assert.match(aiControls, /context\.drawImage\(video, 0, 0, canvas\.width, canvas\.height\)/);
 assert.doesNotMatch(aiControls, /createImageBitmap\(video\)/);
 });
