@@ -84,6 +84,19 @@ jobs:
           client.write_text(source)
           PY
 
+      - name: Verify patched source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'id: "lama-256-int8"' lib/videoflow/ai/AIModelRegistry.ts
+          grep -F 'name: "LaMa Dynamic 256 INT8"' lib/videoflow/ai/AIModelRegistry.ts
+          grep -F 'inputWidth: 256' lib/videoflow/ai/AIModelRegistry.ts
+          grep -F 'inputHeight: 256' lib/videoflow/ai/AIModelRegistry.ts
+          grep -F 'extractROI(source, plan.roi, 256, 256)' lib/videoflow/ai/AIManager.ts
+          grep -F 'WORKER_INTERACTIVE_BUDGET_MS = 300_000' lib/videoflow/ai/AIWorkerClient.ts
+          grep -F 'WORKER_INFERENCE_TIMEOUT_MS = 270_000' lib/videoflow/ai/AIWorkerClient.ts
+          npx tsc --noEmit
+
       - name: Create isolated Firefox dynamic-model benchmark spec
         shell: bash
         run: |
@@ -124,16 +137,17 @@ jobs:
       - name: Fresh production build
         run: npm run build
 
-      - name: Verify diagnostic build
+      - name: Stage and verify dynamic model in diagnostic dist
         shell: bash
         run: |
           set -euo pipefail
-          test -s dist/models/lama-256-int8.onnx
+          # This benchmark isolates browser inference. Static-export inclusion is
+          # a separate production packaging concern, so explicitly stage the
+          # already checksum-verified model into the diagnostic distribution.
+          mkdir -p dist/models
+          cp public/models/lama-256-int8.onnx dist/models/lama-256-int8.onnx
           echo "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972  dist/models/lama-256-int8.onnx" | sha256sum --check --strict
-          grep -F 'id: "lama-256-int8"' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
-          grep -F 'inputWidth: 256' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
-          grep -F 'inputHeight: 256' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
-          grep -F 'extractROI(source, plan.roi, 256, 256)' lib/videoflow/ai/AIManager.ts >/dev/null
+          test "$(stat -c '%s' dist/models/lama-256-int8.onnx)" = "61512617"
 
       - name: Install Firefox
         run: npx playwright install --with-deps firefox
