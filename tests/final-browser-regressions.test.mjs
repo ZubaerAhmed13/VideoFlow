@@ -55,14 +55,16 @@ test("WebKit offline AI limitation is measured instead of assumed", async () => 
   assert.doesNotMatch(e2e, /sourceDurationSeconds: 5/);
 });
 
-test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {
+test("Firefox browser matrix uses native Ogg Theora Vorbis fixtures", async () => {
   const fixtures = await read("scripts/generate-test-fixtures.mjs");
   const e2e = await read("tests/e2e/videoflow.spec.ts");
-  assert.match(fixtures, /overlap-source\.webm/);
-  assert.match(fixtures, /"libvpx"/);
+  const media = await read("lib/videoflow/media.ts");
+  assert.match(fixtures, /overlap-source\.ogv/);
+  assert.match(fixtures, /"libtheora"/);
   assert.match(fixtures, /libvorbis/);
   assert.match(e2e, /firefoxFixture/);
   assert.match(e2e, /firefoxAI/);
+  assert.match(media, /ogv\|ogm/);
 });
 
 

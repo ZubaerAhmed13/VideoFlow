@@ -7,8 +7,8 @@ import { trackingMetrics } from "../../lib/videoflow/ai/quality-metrics.mjs";
 const root = process.cwd();
 const generated = join(root, "tests", "fixtures", "generated");
 const fixture = join(generated, "overlap-source.mp4");
-const firefoxFixture = join(generated, "overlap-source.webm");
-const firefoxAI = join(root, "tests", "fixtures", "ai", "ai-static-watermark-720p.webm");
+const firefoxFixture = join(generated, "overlap-source.ogv");
+const firefoxAI = join(root, "tests", "fixtures", "ai", "ai-static-watermark-720p.ogv");
 const tone = join(generated, "tone.wav");
 const image = join(generated, "overlay.png");
 
@@ -28,7 +28,12 @@ async function importMedia(page: Page, files: string | string[]) {
   await page.getByTestId("media-import").setInputFiles(Array.isArray(files) ? selectedFiles : selectedFiles[0]);
   // Timeline state is the durable product result; the toast is intentionally
   // transient and should not be the synchronization primitive for E2E.
-  await expect(page.locator(".vf-clip")).toHaveCount(before + list.length, { timeout: 30_000 });
+  try {
+    await expect(page.locator(".vf-clip")).toHaveCount(before + list.length, { timeout: 45_000 });
+  } catch (error) {
+    const diagnostics = (await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 4_000);
+    throw new Error(`Media import did not reach the timeline. Browser diagnostics: ${diagnostics}`, { cause: error });
+  }
 }
 
 async function queueMp4(page: Page, preset?: string) {

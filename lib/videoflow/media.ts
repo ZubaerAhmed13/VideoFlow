@@ -47,6 +47,9 @@ function readSignature(bytes: Uint8Array): string {
 }
 
 function kindForFile(file: File, signature: string): MediaKind | null {
+  // Ogg is a container used by both audio and video. The filename/MIME
+  // disambiguates native Ogg/Theora video without fabricating codec metadata.
+  if (/\.(ogv|ogm)$/i.test(file.name) || file.type === "video/ogg") return "video";
   if (file.type.startsWith("video/") || ["webm/matroska", "iso-base-media", "avi"].includes(signature)) return "video";
   if (file.type.startsWith("audio/") || ["wave", "ogg", "mpeg-audio", "flac"].includes(signature)) return "audio";
   if (file.type.startsWith("image/") || ["png", "jpeg", "gif", "webp"].includes(signature)) return "image";
