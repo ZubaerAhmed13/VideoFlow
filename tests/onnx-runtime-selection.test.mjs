@@ -15,7 +15,7 @@ test("WASM-only AI uses the pure ONNX runtime while WebGPU keeps the WebGPU bund
   assert.match(client, /ort\.wasm\.bundle\.min\.mjs/);
   assert.match(client, /ort\.webgpu\.bundle\.min\.mjs/);
   assert.match(client, /useWebgpu/);
-  assert.match(client, /providers = useWebgpu \? \["webgpu", "wasm"\] : \["wasm"\]/);
+  assert.match(client, /const providers: AIProvider\[\] = useWebgpu \? \["webgpu", "wasm"\] : \["wasm"\]/);
   assert.match(client, /WORKER_INIT_TIMEOUT_MS = 45_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
   assert.match(client, /AIWorkerWatchdogError/);
