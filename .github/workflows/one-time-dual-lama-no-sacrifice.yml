@@ -89,6 +89,51 @@ jobs:
           regression_path.write_text(regression)
           PY
 
+      - name: Apply memory-bounded batched tracking
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-batched-tracking.py
+          python - <<'PY'
+          from pathlib import Path
+
+          controls_path = Path("components/videoflow/AIWatermarkControls.tsx")
+          controls = controls_path.read_text()
+          replacements = [
+              (
+                  'type StillPreview = { before: string; after: string };\nconst TRACKING_FFMPEG_BATCH_SIZE = 4;',
+                  '''type StillPreview = { before: string; after: string };\nconst TRACKING_FFMPEG_MAX_BATCH_SIZE = 4;\nconst TRACKING_BATCH_PIXEL_BUDGET = 16_000_000;\n\nfunction trackingFfmpegBatchSize(width: number, height: number): number {\n  const pixels = Math.max(1, width * height);\n  return Math.max(1, Math.min(TRACKING_FFMPEG_MAX_BATCH_SIZE, Math.floor(TRACKING_BATCH_PIXEL_BUDGET / pixels)));\n}''',
+              ),
+              (
+                  '''      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {''',
+                  '''      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const trackingBatchSize = trackingFfmpegBatchSize(\n        asset.proxy?.width ?? asset.width,\n        asset.proxy?.height ?? asset.height,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {''',
+              ),
+              (
+                  '''        const batchStart = Math.floor(index / TRACKING_FFMPEG_BATCH_SIZE) * TRACKING_FFMPEG_BATCH_SIZE;\n        if (trackingBatchStart != batchStart) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + TRACKING_FFMPEG_BATCH_SIZE);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const offset = index - trackingBatchStart;\n        const frame = trackingBatch[offset];''',
+                  '''        const batchStart = Math.floor(index / trackingBatchSize) * trackingBatchSize;\n        const offset = index - batchStart;\n        // A tracking worker can fall back to the streaming implementation and\n        // request an earlier frame again. Refill a consumed slot rather than\n        // treating a safe worker restart as a media-decoder failure.\n        if (trackingBatchStart !== batchStart || !trackingBatch[offset]) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + trackingBatchSize);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const frame = trackingBatch[offset];''',
+              ),
+          ]
+          for old, new in replacements:
+              if controls.count(old) != 1:
+                  raise SystemExit(f"tracking hardening source contract changed: {old[:90]!r}")
+              controls = controls.replace(old, new)
+          controls_path.write_text(controls)
+
+          test_path = Path("tests/tracking-batch-extraction.test.mjs")
+          test = test_path.read_text()
+          test_replacements = [
+              ('assert.match(controls, /TRACKING_FFMPEG_BATCH_SIZE = 4/);',
+               'assert.match(controls, /TRACKING_FFMPEG_MAX_BATCH_SIZE = 4/);\n  assert.match(controls, /TRACKING_BATCH_PIXEL_BUDGET = 16_000_000/);\n  assert.match(controls, /function trackingFfmpegBatchSize/);'),
+              ('assert.match(controls, /sourceTimes\\.slice\\(batchStart, batchStart \\+ TRACKING_FFMPEG_BATCH_SIZE\\)/);',
+               'assert.match(controls, /sourceTimes\\.slice\\(batchStart, batchStart \\+ trackingBatchSize\\)/);\n  assert.match(controls, /trackingBatchStart !== batchStart \\|\\| !trackingBatch\\[offset\\]/);'),
+          ]
+          for old, new in test_replacements:
+              if test.count(old) != 1:
+                  raise SystemExit(f"tracking regression contract changed: {old!r}")
+              test = test.replace(old, new)
+          test_path.write_text(test)
+          PY
+
       - name: Install dependencies
         run: npm ci
 
@@ -136,17 +181,27 @@ jobs:
         run: npx playwright install --with-deps firefox
 
       - name: Firefox genuine neural preview, recovery, tracking and offline reuse
-        run: npx playwright test tests/e2e/videoflow.spec.ts --project=firefox --grep "bundled AI executes a genuine local neural preview with tracking and offline reuse" --reporter=line
+        shell: bash
+        run: |
+          set +e
+          npx playwright test tests/e2e/videoflow.spec.ts --project=firefox --grep "bundled AI executes a genuine local neural preview with tracking and offline reuse" --reporter=line
+          status=$?
+          if [[ "$status" -ne 0 ]]; then
+            echo "--- Firefox Playwright error contexts ---"
+            find test-results -name error-context.md -print -exec cat {} \; 2>/dev/null || true
+          fi
+          exit "$status"
 
       - name: Commit product migration only after every gate succeeds
         run: |
           set -euo pipefail
           git checkout -- .github/scripts/apply-dual-lama.py
+          git checkout -- .github/scripts/apply-batched-tracking.py
           git checkout -- ci-results 2>/dev/null || true
           git config user.name "VideoFlow Release Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -u
-          git add public/models/lama-512-int8.model.json
+          git add public/models/lama-512-int8.model.json tests/tracking-batch-extraction.test.mjs
           git status --short
-          git commit -m "Preserve optimized 512 AI with adaptive preview accelerator"
+          git commit -m "Preserve optimized 512 AI with bounded preview and tracking acceleration"
           git push origin HEAD:fix/dual-lama-no-sacrifice
