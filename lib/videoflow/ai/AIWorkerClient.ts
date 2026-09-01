@@ -20,6 +20,7 @@ type Reply = {
   ok: boolean;
   error?: string;
   provider?: AIProvider;
+  wasmThreads?: number;
   inferenceMs?: number;
   rgba?: ArrayBuffer;
 };
@@ -29,28 +30,70 @@ type PendingRequest = {
   reject: (reason: unknown) => void;
   timer?: ReturnType<typeof setTimeout>;
   stage: WorkerStage | "queued";
+  operation: string;
 };
 
 type WorkerPlan = {
   key: string;
   runtimeFile: string;
   providers: AIProvider[];
+  maxWasmThreads: number;
 };
 
 let worker: Worker | null = null;
 let initPromise: Promise<AIProvider> | null = null;
 let activePlanKey: string | null = null;
+let activeProvider: AIProvider | null = null;
+let activeWasmThreads = 1;
 let sequence = 0;
 const pending = new Map<number, PendingRequest>();
 let restartCount = 0;
 
 const WORKER_INIT_TIMEOUT_MS = 45_000;
+const WORKER_THREADED_PROBE_TIMEOUT_MS = 75_000;
 const WORKER_INFERENCE_TIMEOUT_MS = 120_000;
+const WASM_THREAD_PROFILE_KEY = "videoflow.ai.wasm-thread-limit";
+
+function readWasmThreadLimit(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.sessionStorage.getItem(WASM_THREAD_PROFILE_KEY) === "1" ? 1 : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSingleThreadWasmProfile(): void {
+  wasmThreadLimit = 1;
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(WASM_THREAD_PROFILE_KEY, "1");
+  } catch {
+    // Session storage is only an optimization. The in-memory profile remains authoritative.
+  }
+}
+
+let wasmThreadLimit: number | null = readWasmThreadLimit();
 
 class AIWorkerWatchdogError extends Error {
-  constructor(message: string) {
+  readonly operation: string;
+  readonly stage: WorkerStage | "queued";
+  readonly provider: AIProvider | null;
+  readonly wasmThreads: number;
+
+  constructor(
+    message: string,
+    operation: string,
+    stage: WorkerStage | "queued",
+    provider: AIProvider | null,
+    wasmThreads: number,
+  ) {
     super(message);
     this.name = "AIWorkerWatchdogError";
+    this.operation = operation;
+    this.stage = stage;
+    this.provider = provider;
+    this.wasmThreads = wasmThreads;
   }
 }
 
@@ -62,13 +105,18 @@ function settlePendingWithError(error: Error): void {
   pending.clear();
 }
 
+function clearActiveWorkerState(active: Worker): void {
+  if (worker !== active) return;
+  worker = null;
+  initPromise = null;
+  activePlanKey = null;
+  activeProvider = null;
+  activeWasmThreads = 1;
+}
+
 function terminateActiveWorker(active: Worker, error: Error, state: "crashed" | "cancelled"): void {
   active.terminate();
-  if (worker === active) {
-    worker = null;
-    initPromise = null;
-    activePlanKey = null;
-  }
+  clearActiveWorkerState(active);
   settlePendingWithError(error);
   updateAIDiagnostics({ workerState: state });
 }
@@ -83,22 +131,24 @@ function ensureWorker(): Worker {
   worker = active;
   active.onmessage = (event: MessageEvent<Reply | StageReply>) => {
     if (event.data.kind === "stage") {
-      const request = pending.get(event.data.id);
-      if (request) request.stage = event.data.stage;
+      const requestEntry = pending.get(event.data.id);
+      if (requestEntry) requestEntry.stage = event.data.stage;
       updateAIDiagnostics({
         workerState: event.data.stage.startsWith("inference-") ? "inference" : "starting",
       });
       return;
     }
-    const request = pending.get(event.data.id);
-    if (!request) return;
+    const requestEntry = pending.get(event.data.id);
+    if (!requestEntry) return;
     pending.delete(event.data.id);
-    if (request.timer) clearTimeout(request.timer);
+    if (requestEntry.timer) clearTimeout(requestEntry.timer);
     if (event.data.ok) {
+      if (event.data.provider) activeProvider = event.data.provider;
+      if (typeof event.data.wasmThreads === "number") activeWasmThreads = event.data.wasmThreads;
       updateAIDiagnostics({ workerState: event.data.rgba ? "idle" : "ready" });
-      request.resolve(event.data);
+      requestEntry.resolve(event.data);
     } else {
-      request.reject(new Error(event.data.error || "AI worker failed."));
+      requestEntry.reject(new Error(event.data.error || "AI worker failed."));
     }
   };
   active.onerror = (event) => {
@@ -116,13 +166,17 @@ function request(
   const active = ensureWorker();
   const id = ++sequence;
   return new Promise((resolve, reject) => {
-    const pendingRequest: PendingRequest = { resolve, reject, stage: "queued" };
+    const pendingRequest: PendingRequest = { resolve, reject, stage: "queued", operation: type };
     if (timeoutMs) {
       pendingRequest.timer = setTimeout(() => {
         const current = pending.get(id);
         if (!current) return;
         const error = new AIWorkerWatchdogError(
           `Local AI worker ${type} exceeded the ${Math.round(timeoutMs / 1000)} second safety limit while ${current.stage}.`,
+          current.operation,
+          current.stage,
+          activeProvider,
+          activeWasmThreads,
         );
         terminateActiveWorker(active, error, "crashed");
       }, timeoutMs);
@@ -138,7 +192,14 @@ async function resolveWorkerPlan(settings: AISettings): Promise<WorkerPlan> {
   const useWebgpu = requested === "webgpu" && capability.webgpu === "available";
   const providers: AIProvider[] = useWebgpu ? ["webgpu", "wasm"] : ["wasm"];
   const runtimeFile = useWebgpu ? "ort.webgpu.bundle.min.mjs" : "ort.wasm.bundle.min.mjs";
-  return { key: `${runtimeFile}:${providers.join(",")}`, runtimeFile, providers };
+  const hardwareThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2));
+  const maxWasmThreads = wasmThreadLimit ?? hardwareThreads;
+  return {
+    key: `${runtimeFile}:${providers.join(",")}:threads-${maxWasmThreads}`,
+    runtimeFile,
+    providers,
+    maxWasmThreads,
+  };
 }
 
 async function initialize(settings: AISettings): Promise<AIProvider> {
@@ -156,12 +217,15 @@ async function initialize(settings: AISettings): Promise<AIProvider> {
         model,
         providers: plan.providers,
         hardwareConcurrency: navigator.hardwareConcurrency || 2,
+        maxWasmThreads: plan.maxWasmThreads,
         imageInput: DEFAULT_AI_MODEL.imageInput,
         maskInput: DEFAULT_AI_MODEL.maskInput,
         outputName: DEFAULT_AI_MODEL.output,
         size: DEFAULT_AI_MODEL.inputWidth,
       }, [model], WORKER_INIT_TIMEOUT_MS);
-      return reply.provider ?? "wasm";
+      activeProvider = reply.provider ?? "wasm";
+      activeWasmThreads = reply.wasmThreads ?? 1;
+      return activeProvider;
     })().catch((error): never => {
       if (activePlanKey === planKey) {
         initPromise = null;
@@ -175,6 +239,14 @@ async function initialize(settings: AISettings): Promise<AIProvider> {
 
 export async function initializeAIWorker(settings: AISettings): Promise<AIProvider> {
   return initialize(settings);
+}
+
+function shouldDowngradeThreadedWasm(error: unknown): error is AIWorkerWatchdogError {
+  return error instanceof AIWorkerWatchdogError
+    && error.operation === "infer"
+    && error.stage === "inference-running"
+    && error.provider === "wasm"
+    && error.wasmThreads > 1;
 }
 
 export async function runWorkerInpainting(
@@ -192,11 +264,14 @@ export async function runWorkerInpainting(
       const rgba = new Uint8ClampedArray(image.data);
       const maskCopy = new Float32Array(mask);
       updateAIDiagnostics({ workerState: "inference" });
+      const timeoutMs = provider === "wasm" && activeWasmThreads > 1
+        ? WORKER_THREADED_PROBE_TIMEOUT_MS
+        : WORKER_INFERENCE_TIMEOUT_MS;
       const reply = await request(
         "infer",
         { rgba: rgba.buffer, mask: maskCopy.buffer },
         [rgba.buffer, maskCopy.buffer],
-        WORKER_INFERENCE_TIMEOUT_MS,
+        timeoutMs,
       );
       if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
       if (!reply.rgba) throw new Error("AI worker returned no image data.");
@@ -206,16 +281,28 @@ export async function runWorkerInpainting(
         inferenceMs: reply.inferenceMs ?? 0,
       };
     };
+
     try {
       return await attempt();
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
       restartCount += 1;
       updateAIDiagnostics({ workerState: "restarting", workerRestarts: restartCount });
+
+      if (shouldDowngradeThreadedWasm(error)) {
+        // Some otherwise capable environments regress or deadlock inside ORT's
+        // pthread execution path. A real timed-out neural run is stronger
+        // evidence than user-agent heuristics, so pin this tab to a fresh
+        // single-thread WASM worker and retry the same inference exactly once.
+        persistSingleThreadWasmProfile();
+        await resetAIWorker();
+        return attempt();
+      }
+
       await resetAIWorker();
-      // A watchdog timeout is evidence that the current neural run did not
-      // make forward progress. Retrying the same expensive run would only
-      // extend the freeze window, so fail boundedly and let the UI recover.
+      // A watchdog on init, WebGPU, or already-single-thread WASM means there
+      // is no safer execution profile left to try. Fail boundedly so the UI
+      // remains responsive instead of migrating inference onto the main thread.
       if (error instanceof AIWorkerWatchdogError) throw error;
       return attempt();
     }
@@ -229,6 +316,8 @@ export async function resetAIWorker(): Promise<void> {
   worker = null;
   initPromise = null;
   activePlanKey = null;
+  activeProvider = null;
+  activeWasmThreads = 1;
   if (!active) return;
   active.terminate();
   settlePendingWithError(new DOMException("AI worker was cancelled or reset.", "AbortError"));
@@ -242,6 +331,8 @@ export function forceAIWorkerCrashForTest(): void {
   worker = null;
   initPromise = null;
   activePlanKey = null;
+  activeProvider = null;
+  activeWasmThreads = 1;
   active?.terminate();
   settlePendingWithError(new Error("Simulated AI inference worker crash."));
   restartCount += 1;
