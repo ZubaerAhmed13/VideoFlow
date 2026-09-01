@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-sync-scripts -- isolation must be established before the editor becomes interactive */
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
