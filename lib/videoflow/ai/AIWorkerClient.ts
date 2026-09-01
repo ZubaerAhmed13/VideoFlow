@@ -50,8 +50,10 @@ const pending = new Map<number, PendingRequest>();
 let restartCount = 0;
 
 const WORKER_INIT_TIMEOUT_MS = 45_000;
-const WORKER_THREADED_PROBE_TIMEOUT_MS = 75_000;
+const WORKER_INTERACTIVE_BUDGET_MS = 165_000;
+const WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000;
 const WORKER_INFERENCE_TIMEOUT_MS = 120_000;
+const WORKER_MIN_TIMEOUT_SLICE_MS = 1_000;
 const WASM_THREAD_PROFILE_KEY = "videoflow.ai.wasm-thread-limit";
 
 function readWasmThreadLimit(): number | null {
@@ -95,6 +97,20 @@ class AIWorkerWatchdogError extends Error {
     this.provider = provider;
     this.wasmThreads = wasmThreads;
   }
+}
+
+function timeoutWithinDeadline(deadline: number, ceilingMs: number, operation: string): number {
+  const remaining = Math.floor(deadline - performance.now());
+  if (remaining <= WORKER_MIN_TIMEOUT_SLICE_MS) {
+    throw new AIWorkerWatchdogError(
+      `Local AI worker ${operation} exhausted the ${Math.round(WORKER_INTERACTIVE_BUDGET_MS / 1000)} second interactive budget.`,
+      operation,
+      "queued",
+      activeProvider,
+      activeWasmThreads,
+    );
+  }
+  return Math.min(ceilingMs, remaining);
 }
 
 function settlePendingWithError(error: Error): void {
@@ -202,7 +218,7 @@ async function resolveWorkerPlan(settings: AISettings): Promise<WorkerPlan> {
   };
 }
 
-async function initialize(settings: AISettings): Promise<AIProvider> {
+async function initialize(settings: AISettings, timeoutMs = WORKER_INIT_TIMEOUT_MS): Promise<AIProvider> {
   const plan = await resolveWorkerPlan(settings);
   if (initPromise && activePlanKey !== plan.key) await resetAIWorker();
   if (!initPromise) {
@@ -222,7 +238,7 @@ async function initialize(settings: AISettings): Promise<AIProvider> {
         maskInput: DEFAULT_AI_MODEL.maskInput,
         outputName: DEFAULT_AI_MODEL.output,
         size: DEFAULT_AI_MODEL.inputWidth,
-      }, [model], WORKER_INIT_TIMEOUT_MS);
+      }, [model], Math.min(WORKER_INIT_TIMEOUT_MS, timeoutMs));
       activeProvider = reply.provider ?? "wasm";
       activeWasmThreads = reply.wasmThreads ?? 1;
       return activeProvider;
@@ -256,17 +272,22 @@ export async function runWorkerInpainting(
   signal?: AbortSignal,
 ): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
+  const deadline = performance.now() + WORKER_INTERACTIVE_BUDGET_MS;
   const abort = () => { void resetAIWorker(); };
   signal?.addEventListener("abort", abort, { once: true });
   try {
     const attempt = async () => {
-      const provider = await initialize(settings);
+      const provider = await initialize(
+        settings,
+        timeoutWithinDeadline(deadline, WORKER_INIT_TIMEOUT_MS, "init"),
+      );
       const rgba = new Uint8ClampedArray(image.data);
       const maskCopy = new Float32Array(mask);
       updateAIDiagnostics({ workerState: "inference" });
-      const timeoutMs = provider === "wasm" && activeWasmThreads > 1
+      const timeoutCeiling = provider === "wasm" && activeWasmThreads > 1
         ? WORKER_THREADED_PROBE_TIMEOUT_MS
         : WORKER_INFERENCE_TIMEOUT_MS;
+      const timeoutMs = timeoutWithinDeadline(deadline, timeoutCeiling, "infer");
       const reply = await request(
         "infer",
         { rgba: rgba.buffer, mask: maskCopy.buffer },
@@ -294,6 +315,8 @@ export async function runWorkerInpainting(
         // pthread execution path. A real timed-out neural run is stronger
         // evidence than user-agent heuristics, so pin this tab to a fresh
         // single-thread WASM worker and retry the same inference exactly once.
+        // The short viability probe deliberately reserves the majority of the
+        // interactive deadline for that reliable fallback.
         persistSingleThreadWasmProfile();
         await resetAIWorker();
         return attempt();
