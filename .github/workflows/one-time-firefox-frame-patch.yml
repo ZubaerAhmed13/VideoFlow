@@ -20,48 +20,40 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("components/videoflow/AIWatermarkControls.tsx")
           source = path.read_text()
 
-          old_seek = '''      try {
-        if (Math.abs(video.currentTime - target) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-video.currentTime = target;
-      } catch (error) {'''
-          new_seek = '''      try {
-        if (Math.abs(video.currentTime - target) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-          video.currentTime = target;
-      } catch (error) {'''
-          if source.count(old_seek) != 1:
-              raise SystemExit(f"Expected one seek-format block, found {source.count(old_seek)}")
-          source = source.replace(old_seek, new_seek, 1)
+          seek_pattern = re.compile(r'(?m)^video\.currentTime = target;$')
+          source, seek_count = seek_pattern.subn('          video.currentTime = target;', source, count=1)
+          if seek_count != 1:
+              raise SystemExit(f"Expected one misindented seek assignment, found {seek_count}")
 
-          old_delay = '''        await new Promise<void>((resolve, reject) => {
-const timer = window.setTimeout(resolve, FRAME_RETRY_DELAY_MS);
-const onAbort = () => {
-  window.clearTimeout(timer);
-  signal?.removeEventListener("abort", onAbort);
-  reject(new DOMException("AI job cancelled.", "AbortError"));
-};
-signal?.addEventListener("abort", onAbort, { once: true });
-        });'''
-          new_delay = '''        await new Promise<void>((resolve, reject) => {
-          let timer = 0;
-          const cleanup = () => {
-            if (timer) window.clearTimeout(timer);
-            signal?.removeEventListener("abort", onAbort);
-          };
-          const finish = () => { cleanup(); resolve(); };
-          const onAbort = () => {
-            cleanup();
-            reject(new DOMException("AI job cancelled.", "AbortError"));
-          };
-          signal?.addEventListener("abort", onAbort, { once: true });
-          timer = window.setTimeout(finish, FRAME_RETRY_DELAY_MS);
-        });'''
-          if source.count(old_delay) != 1:
-              raise SystemExit(f"Expected one retry-delay block, found {source.count(old_delay)}")
-          path.write_text(source.replace(old_delay, new_delay, 1))
+          delay_pattern = re.compile(
+              r'(?ms)^        await new Promise<void>\(\(resolve, reject\) => \{\nconst timer = window\.setTimeout\(resolve, FRAME_RETRY_DELAY_MS\);\nconst onAbort = \(\) => \{\n  window\.clearTimeout\(timer\);\n  signal\?\.removeEventListener\("abort", onAbort\);\n  reject\(new DOMException\("AI job cancelled\.", "AbortError"\)\);\n\};\nsignal\?\.addEventListener\("abort", onAbort, \{ once: true \}\);\n        \}\);$'
+          )
+          replacement = "\n".join([
+              '        await new Promise<void>((resolve, reject) => {',
+              '          let timer = 0;',
+              '          const cleanup = () => {',
+              '            if (timer) window.clearTimeout(timer);',
+              '            signal?.removeEventListener("abort", onAbort);',
+              '          };',
+              '          const finish = () => { cleanup(); resolve(); };',
+              '          const onAbort = () => {',
+              '            cleanup();',
+              '            reject(new DOMException("AI job cancelled.", "AbortError"));',
+              '          };',
+              '          signal?.addEventListener("abort", onAbort, { once: true });',
+              '          timer = window.setTimeout(finish, FRAME_RETRY_DELAY_MS);',
+              '        });',
+          ])
+          source, delay_count = delay_pattern.subn(replacement, source, count=1)
+          if delay_count != 1:
+              raise SystemExit(f"Expected one retry-delay block, found {delay_count}")
+
+          path.write_text(source)
           PY
 
           git config user.name "github-actions[bot]"
