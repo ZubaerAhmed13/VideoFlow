@@ -13,6 +13,7 @@ type OrtRuntime = {
 };
 
 type RuntimeFlavor = "webgpu" | "wasm";
+type ExecutionPlan = { flavor: RuntimeFlavor; providers: AIProvider[] };
 type ResolvedSession = {
   runtime: OrtRuntime;
   session: Awaited<ReturnType<OrtRuntime["InferenceSession"]["create"]>>;
@@ -42,7 +43,7 @@ async function loadRuntime(flavor: RuntimeFlavor): Promise<OrtRuntime> {
   return runtimePromises[flavor]!;
 }
 
-async function executionPlan(settings: AISettings): Promise<{ flavor: RuntimeFlavor; providers: string[] }> {
+async function executionPlan(settings: AISettings): Promise<ExecutionPlan> {
   const capability = await detectAICapability();
   const requested = settings.provider === "auto" ? capability.recommendedProvider : settings.provider;
   const useWebgpu = requested === "webgpu" && capability.webgpu === "available";
@@ -60,7 +61,7 @@ export async function initializeAI(settings: AISettings): Promise<{ provider: AI
       await previous?.session.release?.();
     }
     sessionFlavor = plan.flavor;
-    sessionPromise = (async () => {
+    sessionPromise = (async (): Promise<ResolvedSession> => {
       const [runtime, model] = await Promise.all([loadRuntime(plan.flavor), getAIModelBytes(DEFAULT_AI_MODEL)]);
       if (!model) throw new Error("AI Reconstruction model not installed.");
       if (runtime.env?.wasm) runtime.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2)) : 1;
@@ -68,7 +69,7 @@ export async function initializeAI(settings: AISettings): Promise<{ provider: AI
         return {
           runtime,
           session: await runtime.InferenceSession.create(model, { executionProviders: plan.providers }),
-          provider: plan.providers[0] as AIProvider,
+          provider: plan.providers[0] ?? "wasm",
           flavor: plan.flavor,
         };
       } catch (error) {
@@ -80,19 +81,23 @@ export async function initializeAI(settings: AISettings): Promise<{ provider: AI
           flavor: plan.flavor,
         };
       }
-    })().catch((error) => {
+    })().catch((error): never => {
       sessionPromise = null;
       sessionFlavor = null;
       throw error;
     });
   }
-  const result = await sessionPromise;
+  const activeSession = sessionPromise;
+  if (!activeSession) throw new Error("AI session initialization did not start.");
+  const result = await activeSession;
   return { provider: result.provider };
 }
 
 async function runImageInpaintingMainThread(image: ImageData, mask: Float32Array, settings: AISettings): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
   const { provider } = await initializeAI(settings);
-  const resolved = await sessionPromise!;
+  const activeSession = sessionPromise;
+  if (!activeSession) throw new Error("AI session is unavailable after initialization.");
+  const resolved = await activeSession;
   const runtime = resolved.runtime;
   const size = DEFAULT_AI_MODEL.inputWidth;
   if (image.width !== size || image.height !== size) throw new Error(`AI input must be ${size}×${size}.`);
