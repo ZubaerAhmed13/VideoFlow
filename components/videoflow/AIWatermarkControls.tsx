@@ -134,7 +134,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       const context = canvas.getContext("2d")!; context.drawImage(bitmap, 0, 0);
       const before = canvas.toDataURL("image/jpeg", 0.92);
       setProgress("Running local ONNX inpainting…");
-      const result = await reconstructFrame(bitmap, bitmap.width, bitmap.height, resolved, settings, null, controller.signal);
+      const result = await reconstructFrame(bitmap, bitmap.width, bitmap.height, resolved, settings, null, controller.signal, 256);
       const effective = effectiveAISettings(settings);
       compositeInpaintedROI(context, result.imageData, result.roi, resolved, effective.feather, effective.blendingStrength);
       const preview = { before, after: canvas.toDataURL("image/jpeg", 0.92) };

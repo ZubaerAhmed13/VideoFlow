@@ -9,7 +9,7 @@ The verified static application is in `dist/`. Its production build includes:
 - current React/TypeScript application JS/CSS
 - AI inference and tracking workers
 - local ONNX Runtime Web modules/WASM
-- checksum-pinned LaMa 512 INT8 model and metadata
+- checksum-pinned LaMa Dynamic INT8 model and metadata
 - local FFmpeg core/WASM
 - generated PWA precache, service worker, manifest and icons
 

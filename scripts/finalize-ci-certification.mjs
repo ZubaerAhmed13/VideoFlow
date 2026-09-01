@@ -99,9 +99,9 @@ const rows = ["chromium", "firefox", "webkit"].map((browser) => {
 }).join("\n");
 
 const model = {
-  name: "LaMa 512 INT8 ONNX",
+  name: "LaMa Dynamic INT8 ONNX",
   version: "g-ronimo / 8e20140-compatible descriptor",
-  sha256: "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe",
+  sha256: "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972",
   license: "Apache-2.0",
   size: "62.1 MB",
   runtime: "ONNX Runtime Web 1.29.0",

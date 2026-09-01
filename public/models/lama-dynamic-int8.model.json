@@ -1,0 +1,12 @@
+{
+  "id": "lama-dynamic-int8",
+  "name": "LaMa Dynamic INT8",
+  "version": "g-ronimo-dynamic",
+  "license": "Apache-2.0",
+  "source": "https://huggingface.co/g-ronimo/lama/blob/main/lama_int8.onnx",
+  "sha256": "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972",
+  "sizeBytes": 61512617,
+  "localPath": "models/lama-dynamic-int8.onnx",
+  "input": "dynamic 1x4xHxW float32 packed RGB+mask; VideoFlow preview 256x256, final/high-quality 512x512",
+  "installation": "Explicit user action copies the checksum-validated bundled model into protected local Cache Storage. The PWA shell never auto-downloads the model."
+}

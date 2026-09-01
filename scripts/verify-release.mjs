@@ -36,8 +36,8 @@ assert.equal(buildInfo.sourceHash, computeSourceFingerprint(), "Production build
 const requireAI = process.env.VIDEOFLOW_REQUIRE_AI_PACK === "1";
 if (requireAI) {
   const aiRequired = [
-    "models/lama-512-int8.onnx",
-    "models/lama-512-int8.model.json",
+    "models/lama-dynamic-int8.onnx",
+    "models/lama-dynamic-int8.model.json",
     "vendor/onnx/ort.webgpu.bundle.min.mjs",
     "vendor/onnx/ort-wasm-simd-threaded.asyncify.mjs",
     "vendor/onnx/ort-wasm-simd-threaded.asyncify.wasm",
@@ -53,10 +53,10 @@ if (requireAI) {
     assertWasmMagic(`vendor/onnx/ort-wasm-simd-threaded.${name}.wasm`);
   }
   assertWasmMagic("vendor/onnx/ort-wasm-simd-threaded.wasm");
-  const modelBytes = readFileSync(join(output, "models/lama-512-int8.onnx"));
+  const modelBytes = readFileSync(join(output, "models/lama-dynamic-int8.onnx"));
   const modelSha = createHash("sha256").update(modelBytes).digest("hex");
-  assert.equal(modelSha, "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe", "AI model checksum mismatch in production dist");
-  assert.equal(modelBytes.byteLength, 62074990, "AI model size mismatch in production dist");
+  assert.equal(modelSha, "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972", "AI model checksum mismatch in production dist");
+  assert.equal(modelBytes.byteLength, 61512617, "AI model size mismatch in production dist");
 }
 
 const files = [];
@@ -74,7 +74,7 @@ if (requireAI) {
     .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   for (const marker of [
-    "LaMa 512 INT8",
+    "LaMa Dynamic INT8",
     "videoflow-ai-inference",
     "videoflow-tracking",
     "local-multiblock",

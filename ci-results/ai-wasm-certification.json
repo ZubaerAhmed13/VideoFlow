@@ -1,10 +1,15 @@
 {
-  "certifiedAt": "2026-08-31T09:16:16.968Z",
+  "certifiedAt": "2026-09-01T14:09:15.651Z",
   "runtime": "ONNX Runtime Web 1.29.0 local bundle",
   "provider": "wasm",
-  "model": "LaMa 512 INT8 ONNX",
-  "modelBytes": 62074990,
-  "modelSha256": "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe",
+  "model": "LaMa Dynamic INT8 ONNX",
+  "modelBytes": 61512617,
+  "modelSha256": "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972",
+  "certificationInputSize": 512,
+  "supportedInputSizes": [
+    256,
+    512
+  ],
   "inputNames": [
     "input"
   ],
@@ -12,10 +17,10 @@
     "output"
   ],
   "outputElements": 786432,
-  "sessionMs": 1674.294374,
-  "inferenceMs": 18756.597555,
-  "controlledMaskedPsnrDb": 39.5733642381263,
-  "controlledMaskedSsim": 0.9726823089663089,
+  "sessionMs": 2141.921618,
+  "inferenceMs": 23729.263023,
+  "controlledMaskedPsnrDb": 39.57336433239449,
+  "controlledMaskedSsim": 0.9726823094101211,
   "qualityThresholds": {
     "minimumPsnrDb": 10,
     "minimumSsim": 0.2

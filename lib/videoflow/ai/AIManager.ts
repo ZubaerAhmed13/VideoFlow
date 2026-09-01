@@ -34,6 +34,7 @@ export async function reconstructFrame(
   settings: AISettings = DEFAULT_AI_SETTINGS,
   context?: TemporalNeighborhood | TemporalFrame[] | null,
   signal?: AbortSignal,
+  inferenceSize: 256 | 512 = 512,
 ): Promise<AIFrameResult> {
   const effective = effectiveAISettings(settings);
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
@@ -46,7 +47,7 @@ export async function reconstructFrame(
     let inferenceMs = 0;
     for (const plan of plans) {
       if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
-      const prepared = extractROI(source, plan.roi, 512, 512);
+      const prepared = extractROI(source, plan.roi, inferenceSize, inferenceSize);
       const modelMask = buildModelMask(mask, plan.roi, prepared.transform, effective.maskExpansion);
       const result = await runImageInpainting(prepared.imageData, modelMask, effective, signal);
       provider = result.provider;

@@ -25,7 +25,7 @@ try {
     ? join(root, "dist", "client")
     : join(root, "dist");
   const precache = JSON.parse(readFileSync(join(output, "precache-manifest.json"), "utf8"));
-  const paths = [...precache, "./models/lama-512-int8.onnx", "./models/lama-512-int8.model.json", "./coi-bootstrap.js", "./service-worker.js"];
+  const paths = [...precache, "./models/lama-dynamic-int8.onnx", "./models/lama-dynamic-int8.model.json", "./coi-bootstrap.js", "./service-worker.js"];
   const results = [];
   for (const path of paths) {
     const response = await fetch(new URL(String(path).replace(/^\.\//, ""), base));

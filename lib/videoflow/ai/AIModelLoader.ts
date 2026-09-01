@@ -2,7 +2,8 @@ import { DEFAULT_AI_MODEL } from "./AIModelRegistry";
 import { deploymentAssetUrl } from "../base-url";
 import type { AIModelDescriptor, AIModelInstallRecord } from "./types";
 
-const MODEL_CACHE = "videoflow-ai-models-v1";
+const MODEL_CACHE = "videoflow-ai-models-v2";
+const LEGACY_MODEL_CACHE = "videoflow-ai-models-v1";
 const MODEL_RECORD = "videoflow-ai-model-record";
 const modelUrl = (id: string) => deploymentAssetUrl(`models/${id}.onnx`);
 
@@ -11,6 +12,9 @@ async function digestHex(buffer: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
+async function clearLegacyModelCache(): Promise<void> {
+  await caches.delete(LEGACY_MODEL_CACHE).catch(() => false);
+}
 
 async function storeVerifiedModel(bytes: ArrayBuffer, descriptor: AIModelDescriptor): Promise<AIModelInstallRecord> {
   if (bytes.byteLength !== descriptor.size) throw new Error(`AI model validation failed. Expected ${descriptor.size} bytes, received ${bytes.byteLength}.`);
@@ -26,6 +30,7 @@ async function storeVerifiedModel(bytes: ArrayBuffer, descriptor: AIModelDescrip
   if (checksum !== descriptor.sha256) throw new Error(`AI model validation failed. Expected ${descriptor.sha256}, received ${checksum}.`);
   const cache = await caches.open(MODEL_CACHE);
   await cache.put(modelUrl(descriptor.id), new Response(bytes, { headers: { "content-type": "application/octet-stream", "x-videoflow-sha256": checksum } }));
+  await clearLegacyModelCache();
   const record: AIModelInstallRecord = { descriptor, state: "installed", installedAt: new Date().toISOString(), verifiedAt: new Date().toISOString() };
   localStorage.setItem(MODEL_RECORD, JSON.stringify(record));
   return record;
@@ -45,13 +50,19 @@ export async function bundledAIModelAvailable(descriptor: AIModelDescriptor = DE
     return false;
   }
 }
+
 export async function installAIModel(file: File, descriptor: AIModelDescriptor = DEFAULT_AI_MODEL): Promise<AIModelInstallRecord> {
   return storeVerifiedModel(await file.arrayBuffer(), descriptor);
 }
 
 export function getAIModelRecord(): AIModelInstallRecord {
   try {
-    return JSON.parse(localStorage.getItem(MODEL_RECORD) ?? "null") ?? { descriptor: DEFAULT_AI_MODEL, state: "not-installed" };
+    const record = JSON.parse(localStorage.getItem(MODEL_RECORD) ?? "null") as AIModelInstallRecord | null;
+    if (!record || record.descriptor?.id !== DEFAULT_AI_MODEL.id) {
+      if (record) localStorage.removeItem(MODEL_RECORD);
+      return { descriptor: DEFAULT_AI_MODEL, state: "not-installed" };
+    }
+    return record;
   } catch {
     return { descriptor: DEFAULT_AI_MODEL, state: "error", error: "Stored AI model metadata is invalid." };
   }
@@ -69,5 +80,6 @@ export async function getAIModelBytes(descriptor: AIModelDescriptor = DEFAULT_AI
 
 export async function removeAIModel(descriptor: AIModelDescriptor = DEFAULT_AI_MODEL): Promise<void> {
   await (await caches.open(MODEL_CACHE)).delete(modelUrl(descriptor.id));
+  await clearLegacyModelCache();
   localStorage.removeItem(MODEL_RECORD);
 }

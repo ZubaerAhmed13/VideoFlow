@@ -42,7 +42,7 @@ test("ONNX execution adaptively supervises threaded WASM inside a killable worke
   // in a fresh single-thread worker, with the stable profile remembered per tab.
   assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
   assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
-  assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
+  assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 125_000/);
   assert.match(client, /timeoutWithinDeadline/);
   assert.match(client, /initialize\([\s\S]*timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\)/);
   assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer"\)/);

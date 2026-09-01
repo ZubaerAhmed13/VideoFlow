@@ -22,7 +22,7 @@ const chunkSize = 20 * 1024 * 1024;
 const githubWebLimit = 25 * 1024 * 1024;
 
 const assetDefinitions = [
-  { target: "public/models/lama-512-int8.onnx" },
+  { target: "public/models/lama-dynamic-int8.onnx" },
   { target: "public/vendor/ffmpeg/ffmpeg-core.wasm" },
   { target: "public/vendor/onnx/ort-wasm-simd-threaded.jsep.wasm" },
 ];

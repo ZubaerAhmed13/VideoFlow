@@ -1,13 +1,13 @@
 # VideoFlow AI Reconstruction Pack
 
-The final release includes the checksum-pinned LaMa 512 INT8 ONNX model at `public/models/lama-512-int8.onnx`; a fresh build copies it to `dist/client/models/lama-512-int8.onnx`. The app does not automatically download or precache the model. The user explicitly installs it into protected local Cache Storage.
+The final release includes the checksum-pinned LaMa Dynamic INT8 ONNX model at `public/models/lama-dynamic-int8.onnx`; a fresh build copies it to `dist/client/models/lama-dynamic-int8.onnx`. The app does not automatically download or precache the model. The user explicitly installs it into protected local Cache Storage.
 
 Model metadata:
 
-- Model: LaMa 512 INT8 ONNX
+- Model: LaMa Dynamic INT8 ONNX
 - License: Apache-2.0
-- Expected SHA-256: `cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe`
-- Expected size: `62,074,990` bytes
+- Expected SHA-256: `1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972`
+- Expected size: `61,512,617` bytes
 - Browser runtime: ONNX Runtime Web 1.29.0, packaged locally under `public/vendor/onnx/`
 - Staging script: `scripts/stage-ai-pack-ci.sh`
 

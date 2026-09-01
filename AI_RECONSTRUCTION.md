@@ -10,13 +10,13 @@ Blur, Pixelate, Cover and Clone are separate non-neural tools and are never repo
 
 | Field | Value |
 | --- | --- |
-| Model | LaMa 512 INT8 ONNX |
-| Version | `g-ronimo-8e20140` |
+| Model | LaMa Dynamic INT8 ONNX |
+| Version | `g-ronimo-dynamic` |
 | License | Apache-2.0 |
-| Path | `models/lama-512-int8.onnx` under the deployment base |
-| Expected size | 62,074,990 bytes |
-| SHA-256 | `cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe` |
-| Metadata | `models/lama-512-int8.model.json` |
+| Path | `models/lama-dynamic-int8.onnx` under the deployment base |
+| Expected size | 61,512,617 bytes |
+| SHA-256 | `1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972` |
+| Metadata | `models/lama-dynamic-int8.model.json` |
 | Notices | `models/MODEL_LICENSE_NOTICE.md` |
 
 The bundled model is optional at PWA-install time. **Install bundled AI** loads it from the same deployment origin, checks exact size and SHA-256, and only then stores it in the protected local AI cache. An invalid file reports `AI model validation failed.` and no session is created. A user can instead install the exact model file through Settings → AI.

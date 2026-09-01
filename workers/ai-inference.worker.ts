@@ -30,7 +30,6 @@ let provider: Provider = "wasm";
 let imageInput = "image";
 let maskInput = "mask";
 let outputName = "output";
-let size = 512;
 let wasmThreads = 1;
 
 type InitRequest = {
@@ -45,7 +44,6 @@ type InitRequest = {
   imageInput: string;
   maskInput: string;
   outputName: string;
-  size: number;
 };
 
 type InferRequest = {
@@ -53,6 +51,7 @@ type InferRequest = {
   type: "infer";
   rgba: ArrayBuffer;
   mask: ArrayBuffer;
+  size: 256 | 512;
 };
 
 type DisposeRequest = { id: number; type: "dispose" };
@@ -95,7 +94,6 @@ async function init(data: InitRequest) {
   imageInput = data.imageInput;
   maskInput = data.maskInput;
   outputName = data.outputName;
-  size = data.size;
   const providers: string[] = data.providers;
   reportStage(data.id, "session-creating");
   try {
@@ -115,7 +113,12 @@ async function infer(data: InferRequest) {
   reportStage(data.id, "inference-preparing");
   const rgba = new Uint8ClampedArray(data.rgba);
   const mask = new Float32Array(data.mask);
+  const size = data.size;
+  if (size !== 256 && size !== 512) throw new Error(`Unsupported AI inference size: ${size}.`);
   const pixels = size * size;
+  if (rgba.length !== pixels * 4 || mask.length !== pixels) {
+    throw new Error(`AI inference buffers do not match ${size}x${size}.`);
+  }
   const inputNames = session.inputNames ?? [imageInput];
   const feeds: Record<string, OrtTensor> = {};
   if (inputNames.length === 1) {

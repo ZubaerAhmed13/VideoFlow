@@ -17,8 +17,8 @@ export interface AIDiagnosticsSnapshot {
 
 let snapshot: AIDiagnosticsSnapshot = {
   runtime: "local-onnxruntime-web",
-  model: "LaMa 512 INT8",
-  modelVersion: "g-ronimo-8e20140",
+  model: "LaMa Dynamic INT8",
+  modelVersion: "g-ronimo-dynamic",
   provider: "not-initialized",
   inferenceROI: "not run",
   temporalWindow: 0,

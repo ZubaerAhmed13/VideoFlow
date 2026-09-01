@@ -25,7 +25,7 @@ test("ONNX execution stays supervised and adaptively recovers from stalled threa
   assert.match(client, /WORKER_INIT_TIMEOUT_MS = 45_000/);
   assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
   assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
-  assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
+  assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 125_000/);
   assert.match(client, /WORKER_MIN_TIMEOUT_SLICE_MS = 1_000/);
   assert.match(client, /AIWorkerWatchdogError/);
 

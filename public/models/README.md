@@ -1,11 +1,13 @@
-# VideoFlow AI Reconstruction Pack
+# VideoFlow local AI model pack
 
-The release does not auto-download or auto-precache the large model. Use **Install bundled AI** in Settings or Watermark Studio; VideoFlow verifies the bundled bytes before copying them into its protected local cache. Manual installation accepts only the same descriptor/checksum.
+VideoFlow uses a checksum-pinned **LaMa Dynamic INT8 ONNX** model. The model is not automatically downloaded or precached by the PWA shell. The user explicitly chooses **Install bundled AI**, after which VideoFlow validates the exact byte size and SHA-256 digest before storing the model in protected local Cache Storage.
 
-Certified descriptor target:
-- Model: LaMa 512 INT8 (`lama_512_int8.onnx`)
+- File: `lama-dynamic-int8.onnx`
+- Source: `https://huggingface.co/g-ronimo/lama/blob/main/lama_int8.onnx`
 - License: Apache-2.0
-- SHA-256: `cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe`
-- Expected size: 62,074,990 bytes
+- Size: 61,512,617 bytes
+- SHA-256: `1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972`
+- Interactive preview: 256x256 ROI inference for bounded latency
+- Final/high-quality reconstruction and certification: 512x512 ROI inference
 
-ONNX Runtime Web 1.29.0 files are hosted locally in `public/vendor/onnx/`. VideoFlow never uploads media, masks, or model tensors.
+The dynamic graph was release-benchmarked at both sizes. 512x512 output parity against the previous fixed-512 export was numerically equivalent within floating-point noise; release certification continues to exercise genuine 512x512 WASM inference.

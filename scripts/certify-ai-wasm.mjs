@@ -5,9 +5,9 @@ import { pathToFileURL } from "node:url";
 
 const root = process.cwd();
 const runtimeDirectory = join(root, "public", "vendor", "onnx");
-const modelPath = join(root, "public", "models", "lama-512-int8.onnx");
-const expectedSha256 = "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe";
-const expectedBytes = 62_074_990;
+const modelPath = join(root, "public", "models", "lama-dynamic-int8.onnx");
+const expectedSha256 = "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972";
+const expectedBytes = 61_512_617;
 const allowedRuntimeFiles = new Set([
   "ort-wasm-simd-threaded.jsep.mjs",
   "ort-wasm-simd-threaded.jsep.wasm",
@@ -127,9 +127,11 @@ if (sha256 !== expectedSha256) throw new Error("AI model validation failed. Chec
     certifiedAt: new Date().toISOString(),
     runtime: "ONNX Runtime Web 1.29.0 local bundle",
     provider: "wasm",
-    model: "LaMa 512 INT8 ONNX",
+    model: "LaMa Dynamic INT8 ONNX",
     modelBytes: model.byteLength,
     modelSha256: sha256,
+    certificationInputSize: 512,
+    supportedInputSizes: [256, 512],
     inputNames: session.inputNames,
     outputNames: session.outputNames,
     outputElements: tensor.data.length,

@@ -52,7 +52,7 @@ let restartCount = 0;
 const WORKER_INIT_TIMEOUT_MS = 45_000;
 const WORKER_INTERACTIVE_BUDGET_MS = 165_000;
 const WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000;
-const WORKER_INFERENCE_TIMEOUT_MS = 120_000;
+const WORKER_INFERENCE_TIMEOUT_MS = 125_000;
 const WORKER_MIN_TIMEOUT_SLICE_MS = 1_000;
 const WASM_THREAD_PROFILE_KEY = "videoflow.ai.wasm-thread-limit";
 
@@ -237,7 +237,6 @@ async function initialize(settings: AISettings, timeoutMs = WORKER_INIT_TIMEOUT_
         imageInput: DEFAULT_AI_MODEL.imageInput,
         maskInput: DEFAULT_AI_MODEL.maskInput,
         outputName: DEFAULT_AI_MODEL.output,
-        size: DEFAULT_AI_MODEL.inputWidth,
       }, [model], Math.min(WORKER_INIT_TIMEOUT_MS, timeoutMs));
       activeProvider = reply.provider ?? "wasm";
       activeWasmThreads = reply.wasmThreads ?? 1;
@@ -272,6 +271,13 @@ export async function runWorkerInpainting(
   signal?: AbortSignal,
 ): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
+  const inferenceSize = image.width;
+  if (image.width !== image.height || (inferenceSize !== 256 && inferenceSize !== 512)) {
+    throw new Error(`Local AI inference requires a square 256x256 or 512x512 prepared ROI; received ${image.width}x${image.height}.`);
+  }
+  if (mask.length !== inferenceSize * inferenceSize) {
+    throw new Error(`Local AI mask size does not match the prepared ${inferenceSize}x${inferenceSize} ROI.`);
+  }
   const deadline = performance.now() + WORKER_INTERACTIVE_BUDGET_MS;
   const abort = () => { void resetAIWorker(); };
   signal?.addEventListener("abort", abort, { once: true });
@@ -290,7 +296,7 @@ export async function runWorkerInpainting(
       const timeoutMs = timeoutWithinDeadline(deadline, timeoutCeiling, "infer");
       const reply = await request(
         "infer",
-        { rgba: rgba.buffer, mask: maskCopy.buffer },
+        { rgba: rgba.buffer, mask: maskCopy.buffer, size: inferenceSize },
         [rgba.buffer, maskCopy.buffer],
         timeoutMs,
       );
