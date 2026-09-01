@@ -25,7 +25,29 @@ jobs:
           cache: npm
 
       - name: Apply dual-model architecture
-        run: python .github/scripts/apply-dual-lama.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path(".github/scripts/apply-dual-lama.py")
+          text = path.read_text()
+          old = '''replace(
+              "components/videoflow/AISettingsPanel.tsx",
+              '      setStatus("Model installed locally and checksum verified.");',
+              '      setStatus("AI model pack installed locally and both checksums verified.");',
+              expected=1,
+          )'''
+          new = '''replace(
+              "components/videoflow/AISettingsPanel.tsx",
+              '      const record = await installBundledAIModel();\\n      setModel(record);\\n      setStatus("Model installed locally and checksum verified.");',
+              '      const record = await installBundledAIModel();\\n      setModel(record);\\n      setStatus("AI model pack installed locally and both checksums verified.");',
+          )'''
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one generic bundled status transform, found {text.count(old)}")
+          path.write_text(text.replace(old, new))
+          PY
+          python .github/scripts/apply-dual-lama.py
 
       - name: Install dependencies
         run: npm ci
@@ -79,6 +101,7 @@ jobs:
       - name: Commit product migration only after every gate succeeds
         run: |
           set -euo pipefail
+          git checkout -- .github/scripts/apply-dual-lama.py
           git checkout -- ci-results 2>/dev/null || true
           git config user.name "VideoFlow Release Bot"
           git config user.email "actions@users.noreply.github.com"
