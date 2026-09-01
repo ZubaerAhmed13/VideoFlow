@@ -32,7 +32,7 @@ jobs:
       - name: Stage ONNX Runtime and fixed reference pack
         run: bash scripts/stage-ai-pack-ci.sh
 
-      - name: Stage checksum-pinned dynamic INT8 LaMa and patch diagnostic model size
+      - name: Stage checksum-pinned dynamic INT8 LaMa, verify 512 parity, and patch diagnostic model
         shell: bash
         run: |
           set -euo pipefail
@@ -44,6 +44,82 @@ jobs:
           echo "${DYNAMIC_SHA}  public/models/lama-256-int8.onnx" | sha256sum --check --strict
           DYNAMIC_SIZE="$(stat -c '%s' public/models/lama-256-int8.onnx)"
           echo "DYNAMIC_MODEL_SIZE=${DYNAMIC_SIZE}"
+
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { join } from "node:path";
+          import { pathToFileURL } from "node:url";
+
+          const root = process.cwd();
+          const runtimeDirectory = join(root, "public", "vendor", "onnx");
+          const ort = await import("./public/vendor/onnx/ort.webgpu.bundle.min.mjs");
+          ort.env.wasm.numThreads = 1;
+          ort.env.wasm.wasmPaths = {
+            mjs: pathToFileURL(join(runtimeDirectory, "ort-wasm-simd-threaded.jsep.mjs")).href,
+            wasm: join(runtimeDirectory, "ort-wasm-simd-threaded.jsep.wasm"),
+          };
+
+          const size = 512;
+          const pixels = size * size;
+          const packed = new Float32Array(4 * pixels);
+          for (let y = 0; y < size; y += 1) {
+            for (let x = 0; x < size; x += 1) {
+              const pixel = y * size + x;
+              const hole = x >= 176 && x < 336 && y >= 190 && y < 322 ? 1 : 0;
+              packed[pixel] = (0.15 + 0.7 * x / (size - 1)) * (1 - hole);
+              packed[pixels + pixel] = (0.2 + 0.6 * y / (size - 1)) * (1 - hole);
+              packed[pixels * 2 + pixel] = (0.3 + 0.3 * Math.sin((x + y) / 43)) * (1 - hole);
+              packed[pixels * 3 + pixel] = hole;
+            }
+          }
+
+          async function run(path) {
+            const bytes = readFileSync(path);
+            const session = await ort.InferenceSession.create(new Uint8Array(bytes), {
+              executionProviders: ["wasm"],
+              executionMode: "sequential",
+              graphOptimizationLevel: "all",
+            });
+            if (session.inputNames.length !== 1) throw new Error(`Unexpected input count for ${path}: ${session.inputNames.length}`);
+            const input = new Float32Array(packed);
+            const started = performance.now();
+            const output = await session.run({
+              [session.inputNames[0]]: new ort.Tensor("float32", input, [1, 4, size, size]),
+            });
+            const inferenceMs = performance.now() - started;
+            const tensor = output[session.outputNames[0]] ?? Object.values(output)[0];
+            const values = Float32Array.from(tensor.data, Number);
+            await session.release();
+            return { values, inferenceMs };
+          }
+
+          const fixed = await run(join(root, "public", "models", "lama-512-int8.onnx"));
+          const dynamic = await run(join(root, "public", "models", "lama-256-int8.onnx"));
+          if (fixed.values.length !== dynamic.values.length) throw new Error("512 parity output length mismatch.");
+          let squared = 0;
+          let absolute = 0;
+          let maxAbs = 0;
+          let signalSquared = 0;
+          for (let i = 0; i < fixed.values.length; i += 1) {
+            const a = fixed.values[i];
+            const b = dynamic.values[i];
+            if (!Number.isFinite(a) || !Number.isFinite(b)) throw new Error("512 parity produced non-finite output.");
+            const delta = a - b;
+            absolute += Math.abs(delta);
+            squared += delta * delta;
+            signalSquared += a * a;
+            maxAbs = Math.max(maxAbs, Math.abs(delta));
+          }
+          const mae = absolute / fixed.values.length;
+          const rmse = Math.sqrt(squared / fixed.values.length);
+          const relativeRmse = rmse / Math.max(1e-12, Math.sqrt(signalSquared / fixed.values.length));
+          console.log(`LAMA_512_PARITY_MAE=${mae}`);
+          console.log(`LAMA_512_PARITY_RMSE=${rmse}`);
+          console.log(`LAMA_512_PARITY_RELATIVE_RMSE=${relativeRmse}`);
+          console.log(`LAMA_512_PARITY_MAX_ABS=${maxAbs}`);
+          console.log(`LAMA_FIXED_512_INFERENCE_MS=${fixed.inferenceMs}`);
+          console.log(`LAMA_DYNAMIC_512_INFERENCE_MS=${dynamic.inferenceMs}`);
+          NODE
 
           python - "${DYNAMIC_SIZE}" <<'PY'
           from pathlib import Path
@@ -141,9 +217,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # This benchmark isolates browser inference. Static-export inclusion is
-          # a separate production packaging concern, so explicitly stage the
-          # already checksum-verified model into the diagnostic distribution.
           mkdir -p dist/models
           cp public/models/lama-256-int8.onnx dist/models/lama-256-int8.onnx
           echo "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972  dist/models/lama-256-int8.onnx" | sha256sum --check --strict
