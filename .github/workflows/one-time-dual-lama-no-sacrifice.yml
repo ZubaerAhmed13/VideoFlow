@@ -97,11 +97,14 @@ jobs:
           from pathlib import Path
           path = Path(".github/scripts/apply-batched-tracking.py")
           text = path.read_text()
-          old = '    } finally { if (jobController.current === controller) jobController.current = null; setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession); }'
-          new = '    } finally {\n      if (jobController.current === controller) jobController.current = null;\n      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);\n    }'
-          if text.count(old) != 1:
-              raise SystemExit(f"expected one stale tracking-finally helper target, found {text.count(old)}")
-          path.write_text(text.replace(old, new))
+          needle = '    } finally { if (jobController.current === controller) jobController.current = null; setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession); }'
+          pos = text.find(needle)
+          section = '\n\n\n# ---------------------------------------------------------------------------\n# 4. Regression coverage'
+          call_start = text.rfind('replace(\n', 0, pos)
+          section_start = text.find(section, pos)
+          if pos < 0 or call_start < 0 or section_start < 0:
+              raise SystemExit("could not isolate the stale generic tracking-finally helper rewrite")
+          path.write_text(text[:call_start] + text[section_start:])
           PY
           python .github/scripts/apply-batched-tracking.py
           python - <<'PY'
@@ -112,15 +115,19 @@ jobs:
           replacements = [
               (
                   'type StillPreview = { before: string; after: string };\nconst TRACKING_FFMPEG_BATCH_SIZE = 4;',
-                  '''type StillPreview = { before: string; after: string };\nconst TRACKING_FFMPEG_MAX_BATCH_SIZE = 4;\nconst TRACKING_BATCH_PIXEL_BUDGET = 16_000_000;\n\nfunction trackingFfmpegBatchSize(width: number, height: number): number {\n  const pixels = Math.max(1, width * height);\n  return Math.max(1, Math.min(TRACKING_FFMPEG_MAX_BATCH_SIZE, Math.floor(TRACKING_BATCH_PIXEL_BUDGET / pixels)));\n}''',
+                  'type StillPreview = { before: string; after: string };\nconst TRACKING_FFMPEG_MAX_BATCH_SIZE = 4;\nconst TRACKING_BATCH_PIXEL_BUDGET = 16_000_000;\n\nfunction trackingFfmpegBatchSize(width: number, height: number): number {\n  const pixels = Math.max(1, width * height);\n  return Math.max(1, Math.min(TRACKING_FFMPEG_MAX_BATCH_SIZE, Math.floor(TRACKING_BATCH_PIXEL_BUDGET / pixels)));\n}',
               ),
               (
-                  '''      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {''',
-                  '''      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const trackingBatchSize = trackingFfmpegBatchSize(\n        asset.proxy?.width ?? asset.width,\n        asset.proxy?.height ?? asset.height,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {''',
+                  '      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {',
+                  '      const sourceTimes = times.map((timelineTime) =>\n        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,\n      );\n      const trackingBatchSize = trackingFfmpegBatchSize(\n        asset.proxy?.width ?? asset.width,\n        asset.proxy?.height ?? asset.height,\n      );\n      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {',
               ),
               (
-                  '''        const batchStart = Math.floor(index / TRACKING_FFMPEG_BATCH_SIZE) * TRACKING_FFMPEG_BATCH_SIZE;\n        if (trackingBatchStart != batchStart) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + TRACKING_FFMPEG_BATCH_SIZE);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const offset = index - trackingBatchStart;\n        const frame = trackingBatch[offset];''',
-                  '''        const batchStart = Math.floor(index / trackingBatchSize) * trackingBatchSize;\n        const offset = index - batchStart;\n        // A tracking worker can fall back to the streaming implementation and\n        // request an earlier frame again. Refill a consumed slot rather than\n        // treating a safe worker restart as a media-decoder failure.\n        if (trackingBatchStart !== batchStart || !trackingBatch[offset]) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + trackingBatchSize);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const frame = trackingBatch[offset];''',
+                  '        const batchStart = Math.floor(index / TRACKING_FFMPEG_BATCH_SIZE) * TRACKING_FFMPEG_BATCH_SIZE;\n        if (trackingBatchStart != batchStart) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + TRACKING_FFMPEG_BATCH_SIZE);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const offset = index - trackingBatchStart;\n        const frame = trackingBatch[offset];',
+                  '        const batchStart = Math.floor(index / trackingBatchSize) * trackingBatchSize;\n        const offset = index - batchStart;\n        // A tracking worker can fall back to the streaming implementation and\n        // request an earlier frame again. Refill a consumed slot rather than\n        // treating a safe worker restart as a media-decoder failure.\n        if (trackingBatchStart !== batchStart || !trackingBatch[offset]) {\n          releaseTrackingBatch();\n          const batchTimes = sourceTimes.slice(batchStart, batchStart + trackingBatchSize);\n          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))\n            .map((frame) => frame as ImageBitmap | null);\n          trackingBatchStart = batchStart;\n        }\n        const frame = trackingBatch[offset];',
+              ),
+              (
+                  '    } catch (caught) {\n      if (caught instanceof DOMException && caught.name === "AbortError") setProgress("Tracking cancelled; decoded frames released.");\n      else setError(caught instanceof Error ? caught.message : String(caught));\n    } finally {\n      if (jobController.current === controller) jobController.current = null;\n      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);\n    }',
+                  '    } catch (caught) {\n      if (caught instanceof DOMException && caught.name === "AbortError") setProgress("Tracking cancelled; decoded frames released.");\n      else setError(caught instanceof Error ? caught.message : String(caught));\n    } finally {\n      releaseTrackingBatch();\n      if (jobController.current === controller) jobController.current = null;\n      setBusy(false);\n      if (frameSession) await releaseFrameExtractionSession(frameSession);\n    }',
               ),
           ]
           for old, new in replacements:
