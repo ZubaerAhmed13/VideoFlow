@@ -1,0 +1,110 @@
+name: One-time Firefox single-thread LaMa benchmark
+
+on:
+  push:
+    branches:
+      - diag/firefox-single-thread-benchmark
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install native fixture dependency
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate deterministic fixtures
+        run: npm run fixtures
+
+      - name: Stage checksum-pinned local AI pack
+        run: bash scripts/stage-ai-pack-ci.sh
+
+      - name: Extend watchdog only for this diagnostic runner
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('lib/videoflow/ai/AIWorkerClient.ts')
+          source = path.read_text()
+          source = source.replace('const WORKER_INTERACTIVE_BUDGET_MS = 165_000;', 'const WORKER_INTERACTIVE_BUDGET_MS = 450_000;')
+          source = source.replace('const WORKER_INFERENCE_TIMEOUT_MS = 120_000;', 'const WORKER_INFERENCE_TIMEOUT_MS = 420_000;')
+          if 'WORKER_INTERACTIVE_BUDGET_MS = 450_000' not in source or 'WORKER_INFERENCE_TIMEOUT_MS = 420_000' not in source:
+              raise SystemExit('Diagnostic timeout patch did not apply')
+          path.write_text(source)
+          PY
+
+      - name: Create isolated Firefox benchmark spec
+        shell: bash
+        run: |
+          cat > tests/e2e/firefox-single-thread-benchmark.spec.ts <<'EOF'
+          import { expect, test } from "@playwright/test";
+          import { join } from "node:path";
+
+          const root = process.cwd();
+          const firefoxAI = join(root, "tests", "fixtures", "ai", "ai-static-watermark-720p.ogv");
+
+          test("measures genuine Firefox single-thread LaMa preview", async ({ page }) => {
+            test.setTimeout(500_000);
+            await page.goto("./");
+            await expect(page.getByText("VideoFlow", { exact: true }).first()).toBeVisible();
+
+            // The production worker client reads this session profile at module load.
+            // Set it first, then reload so this diagnostic starts at one WASM thread
+            // without spending any time in the multithreaded viability probe.
+            await page.evaluate(() => sessionStorage.setItem("videoflow.ai.wasm-thread-limit", "1"));
+            await page.reload({ waitUntil: "domcontentloaded" });
+            await expect(page.getByText("VideoFlow", { exact: true }).first()).toBeVisible();
+
+            await page.getByTestId("media-import").setInputFiles(firefoxAI);
+            await expect(page.locator(".vf-clip-video")).toHaveCount(1, { timeout: 45_000 });
+            await page.locator(".vf-clip-video").first().click();
+            await page.getByRole("button", { name: /Add region/i }).click();
+            await page.getByRole("button", { name: /Install bundled AI/i }).click();
+            await expect(page.getByText(/checksum verified/i)).toBeVisible({ timeout: 120_000 });
+            await page.getByLabel("Region 1 method").selectOption("ai");
+
+            const started = Date.now();
+            await page.getByRole("button", { name: /Run AI preview/i }).click();
+            await expect(page.locator(".vf-ai-preview")).toBeVisible({ timeout: 430_000 });
+            const elapsed = Date.now() - started;
+            console.log(`FIREFOX_SINGLE_THREAD_PREVIEW_MS=${elapsed}`);
+            const evidence = await page.getByText(/inference.*ROI/i).textContent();
+            console.log(`FIREFOX_SINGLE_THREAD_EVIDENCE=${evidence ?? "missing"}`);
+          });
+          EOF
+
+      - name: Fresh production build
+        run: npm run build
+
+      - name: Install Firefox
+        run: npx playwright install --with-deps firefox
+
+      - name: Run genuine single-thread Firefox benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          npx playwright test tests/e2e/firefox-single-thread-benchmark.spec.ts --project=firefox --retries=0 --reporter=list | tee firefox-single-thread.log
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-single-thread-benchmark
+          path: |
+            firefox-single-thread.log
+            playwright-report
+            test-results
+          if-no-files-found: ignore
