@@ -90,7 +90,7 @@ async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number,
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
         if (Math.abs(video.currentTime - target) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
-video.currentTime = target;
+          video.currentTime = target;
       } catch (error) {
         cleanup();
         reject(error);
@@ -125,13 +125,18 @@ async function frameAt(video: HTMLVideoElement, time: number, signal?: AbortSign
       if (attempt + 1 < FRAME_CAPTURE_RETRIES) {
         await waitForFramePresentation(video, signal);
         await new Promise<void>((resolve, reject) => {
-const timer = window.setTimeout(resolve, FRAME_RETRY_DELAY_MS);
-const onAbort = () => {
-  window.clearTimeout(timer);
-  signal?.removeEventListener("abort", onAbort);
-  reject(new DOMException("AI job cancelled.", "AbortError"));
-};
-signal?.addEventListener("abort", onAbort, { once: true });
+          let timer = 0;
+          const cleanup = () => {
+            if (timer) window.clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+          };
+          const finish = () => { cleanup(); resolve(); };
+          const onAbort = () => {
+            cleanup();
+            reject(new DOMException("AI job cancelled.", "AbortError"));
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+          timer = window.setTimeout(finish, FRAME_RETRY_DELAY_MS);
         });
       }
     }
