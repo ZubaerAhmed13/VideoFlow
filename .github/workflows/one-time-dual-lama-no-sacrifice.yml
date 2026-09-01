@@ -49,6 +49,38 @@ jobs:
           PY
           python .github/scripts/apply-dual-lama.py
 
+      - name: Align regression contracts with dual-model architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          cert_path = Path("scripts/certify-ai-wasm.mjs")
+          cert = cert_path.read_text()
+          replacements = {
+              'throw new Error(`${spec.model} validation failed. Size mismatch.`);': 'throw new Error(`AI model validation failed: ${spec.model} size mismatch.`);',
+              'throw new Error(`${spec.model} validation failed. Checksum mismatch.`);': 'throw new Error(`AI model validation failed: ${spec.model} checksum mismatch.`);',
+          }
+          for old, new in replacements.items():
+              if cert.count(old) != 1:
+                  raise SystemExit(f"certification contract missing: {old}")
+              cert = cert.replace(old, new)
+          cert_path.write_text(cert)
+
+          regression_path = Path("tests/final-browser-regressions.test.mjs")
+          regression = regression_path.read_text()
+          old_init = 'assert.match(client, /initialize\\([\\s\\S]*timeoutWithinDeadline\\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\\)/);'
+          new_init = 'assert.match(client, /initialize\\([\\s\\S]*modelDescriptor,[\\s\\S]*timeoutWithinDeadline\\(deadline, WORKER_INIT_TIMEOUT_MS, "init", budgetMs\\)/);'
+          old_infer = 'assert.match(client, /timeoutWithinDeadline\\(deadline, timeoutCeiling, "infer"\\)/);'
+          new_infer = 'assert.match(client, /timeoutWithinDeadline\\(deadline, timeoutCeiling, "infer", budgetMs\\)/);'
+          for old, new in [(old_init, new_init), (old_infer, new_infer)]:
+              if regression.count(old) != 1:
+                  raise SystemExit(f"regression contract missing: {old}")
+              regression = regression.replace(old, new)
+          regression_path.write_text(regression)
+          PY
+
       - name: Install dependencies
         run: npm ci
 
@@ -70,7 +102,12 @@ jobs:
           npx tsc --noEmit
           npm run lint
 
-      - name: Unit, architecture and regression suite
+      - name: Fresh production build
+        run: |
+          rm -rf dist
+          npm run build
+
+      - name: Unit, architecture, rendered-output and regression suite
         run: npm run test:unit
 
       - name: Genuine dual-model WASM certification
@@ -78,11 +115,6 @@ jobs:
 
       - name: Media quality and colour fidelity gate
         run: npm run cert:quality
-
-      - name: Fresh production build
-        run: |
-          rm -rf dist
-          npm run build
 
       - name: Verify production distribution contains both model packs
         env:
