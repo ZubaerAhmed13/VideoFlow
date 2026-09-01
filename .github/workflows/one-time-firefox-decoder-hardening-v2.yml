@@ -1,0 +1,101 @@
+name: One-time Firefox decoder hardening v2
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-time-firefox-decoder-hardening-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Reuse guarded decoder transform and stabilize async references
+        shell: bash
+        run: |
+          awk '
+            /python - <<.PY./ { capture=1; next }
+            capture && /^          PY$/ { exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/one-time-firefox-decoder-hardening.yml > /tmp/apply_decoder_patch.py
+          test -s /tmp/apply_decoder_patch.py
+          python /tmp/apply_decoder_patch.py
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("components/videoflow/AIWatermarkControls.tsx")
+          source = path.read_text()
+
+          preview_old = '''      video = await openFrameExtractionVideo(sourceUrl, controller.signal);
+          setProgress("Decoding current frame…");
+          const sourceTime = clip.sourceStart + Math.max(0, playhead - clip.timelineStart) * clip.speed;
+          const bitmap = await captureVideoFrame(video, sourceTime, controller.signal);'''
+          preview_new = '''      const extractionVideo = await openFrameExtractionVideo(sourceUrl, controller.signal);
+          video = extractionVideo;
+          setProgress("Decoding current frame…");
+          const sourceTime = clip.sourceStart + Math.max(0, playhead - clip.timelineStart) * clip.speed;
+          const bitmap = await captureVideoFrame(extractionVideo, sourceTime, controller.signal);'''
+          if source.count(preview_old) != 1:
+              raise SystemExit(f"Expected one preview decoder reference block, found {source.count(preview_old)}")
+          source = source.replace(preview_old, preview_new, 1)
+
+          tracking_old = '''      video = await openFrameExtractionVideo(sourceUrl, controller.signal);
+          const anchor = Math.max(mask.start, Math.min(mask.end, playhead));'''
+          tracking_new = '''      const extractionVideo = await openFrameExtractionVideo(sourceUrl, controller.signal);
+          video = extractionVideo;
+          const anchor = Math.max(mask.start, Math.min(mask.end, playhead));'''
+          if source.count(tracking_old) != 1:
+              raise SystemExit(f"Expected one tracking decoder reference block, found {source.count(tracking_old)}")
+          source = source.replace(tracking_old, tracking_new, 1)
+
+          callback_old = 'captureVideoFrame(video, clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed, controller.signal)'
+          callback_new = 'captureVideoFrame(extractionVideo, clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed, controller.signal)'
+          if source.count(callback_old) != 1:
+              raise SystemExit(f"Expected one tracking frame callback, found {source.count(callback_old)}")
+          source = source.replace(callback_old, callback_new, 1)
+          path.write_text(source)
+
+          tests_path = Path("tests/final-browser-regressions.test.mjs")
+          tests = tests_path.read_text()
+          assertion_old = 'assert.match(aiControls, /captureVideoFrame\\(video, sourceTime/);'
+          assertion_new = 'assert.match(aiControls, /captureVideoFrame\\(extractionVideo, sourceTime/);'
+          if tests.count(assertion_old) != 1:
+              raise SystemExit(f"Expected one preview decoder regression assertion, found {tests.count(assertion_old)}")
+          tests_path.write_text(tests.replace(assertion_old, assertion_new, 1))
+          PY
+
+          git diff --check
+          node --test tests/final-browser-regressions.test.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Lint changed decoder path
+        run: npx eslint components/videoflow/AIWatermarkControls.tsx lib/videoflow/ai/VideoFrameDecoder.ts tests/final-browser-regressions.test.mjs
+
+      - name: Commit guarded patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/videoflow/AIWatermarkControls.tsx lib/videoflow/ai/VideoFrameDecoder.ts tests/final-browser-regressions.test.mjs
+          git diff --cached --check
+          git diff --cached --quiet && { echo "No patch produced"; exit 1; }
+          git commit -m "Harden cross-browser AI video frame decoding"
+          git push origin HEAD:main
