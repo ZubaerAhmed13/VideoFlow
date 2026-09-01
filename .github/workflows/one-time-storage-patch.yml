@@ -1,0 +1,72 @@
+name: One-time Firefox storage patch
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-time-storage-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Apply exact guarded storage patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_path = Path("components/videoflow/VideoFlowApp.tsx")
+          app = app_path.read_text()
+          old = '''            if (storage.mode === "persisted") await navigator.storage?.persist?.();
+            await saveAsset(asset);'''
+          new = '''            if (storage.mode === "persisted")
+              void navigator.storage?.persist?.().catch(() => undefined);
+            markImportStage(`Saving ${file.name} as ${storage.mode}`);
+            await saveAsset(asset);'''
+          if app.count(old) != 1:
+              raise SystemExit(f"Expected exactly one blocking persistence call, found {app.count(old)}")
+          app_path.write_text(app.replace(old, new, 1))
+
+          test_path = Path("tests/final-browser-regressions.test.mjs")
+          tests = test_path.read_text()
+          replacement = '''test("release dialogs and cross-browser imports remain bounded", async () => {
+            assert.match(await read("app/globals.css"), /\\.vf-export-dialog[\\s\\S]*max-height: calc\\(100dvh - 32px\\)[\\s\\S]*overflow-y: auto/);
+            const media = await read("lib/videoflow/media.ts");
+            assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
+            assert.match(media, /probeMediaBlob\\(file, file\\.name, controller\\.signal\\)/);
+            assert.match(media, /controller\\.abort\\(\\)/);
+            assert.match(media, /STORAGE_ESTIMATE_TIMEOUT_MS = 1_000/);
+            assert.match(media, /const estimatePromise = navigator\\.storage\\?\\.estimate\\?\\.\\(\\)/);
+            assert.match(media, /estimateFreeDecision\\.mode !== "persisted"/);
+            const app = await read("components/videoflow/VideoFlowApp.tsx");
+            assert.ok(app.includes('if (storage.mode === "persisted")\\n              void navigator.storage?.persist?.().catch(() => undefined);'));
+            assert.doesNotMatch(app, /await navigator\\.storage\\?\\.persist\\?\\.\\(\\)/);
+            assert.ok(app.includes('markImportStage(`Saving ${file.name} as ${storage.mode}`);'));
+            const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
+            assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
+            assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
+            assert.match(ffmpeg, /FFmpeg initialization cancelled/);
+            assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
+          });
+
+          '''
+          pattern = r'test\("release dialogs and cross-browser imports remain bounded", async \(\) => \{.*?\n\}\);\n\n(?=test\("moving-watermark certification fixture uses a true time expression")'
+          updated, count = re.subn(pattern, replacement, tests, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one browser-regression test block, found {count}")
+          test_path.write_text(updated)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/videoflow/VideoFlowApp.tsx tests/final-browser-regressions.test.mjs
+          git diff --cached --check
+          git diff --cached --quiet || git commit -m "Do not block media import on storage persistence prompt"
+          git push origin HEAD:main
