@@ -1,0 +1,89 @@
+name: One-time dual LaMa no-sacrifice migration
+
+on:
+  push:
+    branches:
+      - fix/dual-lama-no-sacrifice
+    paths:
+      - .github/workflows/one-time-dual-lama-no-sacrifice.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-and-prove:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      - name: Apply dual-model architecture
+        run: python .github/scripts/apply-dual-lama.py
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install native fixture dependency
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Generate deterministic fixtures
+        run: npm run fixtures
+
+      - name: Stage local FFmpeg runtime
+        run: node scripts/copy-ffmpeg-assets.mjs
+
+      - name: Stage checksum-pinned dual LaMa + local ONNX runtime
+        run: bash scripts/stage-ai-pack-ci.sh
+
+      - name: TypeScript and lint
+        run: |
+          set -euo pipefail
+          npx tsc --noEmit
+          npm run lint
+
+      - name: Unit, architecture and regression suite
+        run: npm run test:unit
+
+      - name: Genuine dual-model WASM certification
+        run: npm run cert:ai:wasm
+
+      - name: Media quality and colour fidelity gate
+        run: npm run cert:quality
+
+      - name: Fresh production build
+        run: |
+          rm -rf dist
+          npm run build
+
+      - name: Verify production distribution contains both model packs
+        env:
+          VIDEOFLOW_REQUIRE_AI_PACK: "1"
+        run: npm run verify:dist
+
+      - name: Verify nested-path local assets
+        run: npm run verify:nested
+
+      - name: Install Firefox for real browser proof
+        run: npx playwright install --with-deps firefox
+
+      - name: Firefox genuine neural preview, recovery, tracking and offline reuse
+        run: npx playwright test tests/e2e/videoflow.spec.ts --project=firefox --grep "bundled AI executes a genuine local neural preview with tracking and offline reuse" --reporter=line
+
+      - name: Commit product migration only after every gate succeeds
+        run: |
+          set -euo pipefail
+          git checkout -- ci-results 2>/dev/null || true
+          git config user.name "VideoFlow Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -u
+          git add public/models/lama-512-int8.model.json
+          git status --short
+          git commit -m "Preserve optimized 512 AI with adaptive preview accelerator"
+          git push origin HEAD:fix/dual-lama-no-sacrifice
