@@ -125,9 +125,15 @@ jobs:
         run: npm run build
 
       - name: Verify diagnostic build
+        shell: bash
         run: |
+          set -euo pipefail
           test -s dist/models/lama-256-int8.onnx
-          grep -R "LaMa Dynamic 256 INT8" dist/assets >/dev/null
+          echo "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972  dist/models/lama-256-int8.onnx" | sha256sum --check --strict
+          grep -F 'id: "lama-256-int8"' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
+          grep -F 'inputWidth: 256' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
+          grep -F 'inputHeight: 256' lib/videoflow/ai/AIModelRegistry.ts >/dev/null
+          grep -F 'extractROI(source, plan.roi, 256, 256)' lib/videoflow/ai/AIManager.ts >/dev/null
 
       - name: Install Firefox
         run: npx playwright install --with-deps firefox
