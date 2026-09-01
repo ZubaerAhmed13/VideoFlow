@@ -74,6 +74,9 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
   assert.match(media, /probeMediaBlob\(file, file\.name, controller\.signal\)/);
   assert.match(media, /controller\.abort\(\)/);
+  assert.match(media, /STORAGE_ESTIMATE_TIMEOUT_MS = 1_000/);
+  assert.match(media, /const estimatePromise = navigator\.storage\?\.estimate\?\.\(\)/);
+  assert.match(media, /estimateFreeDecision\.mode !== "persisted"/);
   const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
   assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
   assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
