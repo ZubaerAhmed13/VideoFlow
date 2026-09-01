@@ -26,14 +26,17 @@ async function importMedia(page: Page, files: string | string[]) {
     ? list.map((file) => file === fixture ? firefoxFixture : file.endsWith("ai-static-watermark-720p.mp4") ? firefoxAI : file)
     : list;
   await page.getByTestId("media-import").setInputFiles(Array.isArray(files) ? selectedFiles : selectedFiles[0]);
-  // Timeline state is the durable product result; the toast is intentionally
-  // transient and should not be the synchronization primitive for E2E.
-  try {
-    await expect(page.locator(".vf-clip")).toHaveCount(before + list.length, { timeout: 45_000 });
-  } catch (error) {
-    const diagnostics = (await page.locator("body").innerText()).replace(/\s+/g, " ").slice(0, 4_000);
-    throw new Error(`Media import did not reach the timeline. Browser diagnostics: ${diagnostics}`, { cause: error });
+  // Fail on the application's real import warning while it is still visible;
+  // otherwise synchronize on the durable timeline state.
+  const timeline = page.locator(".vf-clip");
+  const importWarning = page.getByText("Some files were not imported", { exact: true });
+  await expect(timeline.or(importWarning)).toBeVisible({ timeout: 45_000 });
+  if (await importWarning.isVisible()) {
+    const toast = importWarning.locator("xpath=ancestor::*[@data-sonner-toast]").first();
+    const detail = await toast.count() ? await toast.innerText() : await importWarning.locator("..").innerText();
+    throw new Error(`Media import failed: ${detail.replace(/\s+/g, " ")}`);
   }
+  await expect(timeline).toHaveCount(before + list.length, { timeout: 45_000 });
 }
 
 async function queueMp4(page: Page, preset?: string) {
