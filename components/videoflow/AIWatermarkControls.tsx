@@ -17,25 +17,127 @@ import type { AIQuality, AISettings, TrackingIssue, TrackingPoint } from "@/lib/
 import { loadAIDefaultSettings } from "@/lib/videoflow/ai/AISettingsStore";
 import type { Clip, RuntimeAsset, WatermarkMask } from "@/lib/videoflow/types";
 
-function frameAt(video: HTMLVideoElement, time: number, signal?: AbortSignal): Promise<ImageBitmap> {
-  if (signal?.aborted) return Promise.reject(new DOMException("AI job cancelled.", "AbortError"));
-  const target = Math.max(0, Math.min(Number.isFinite(video.duration) ? video.duration : time, time));
-  if (video.readyState >= 2 && Math.abs(video.currentTime - target) < 0.0005) return createImageBitmap(video);
+const FRAME_DECODE_TIMEOUT_MS = 8_000;
+const FRAME_CAPTURE_RETRIES = 4;
+const FRAME_RETRY_DELAY_MS = 80;
+
+type VideoWithFrameCallback = HTMLVideoElement & {
+  requestVideoFrameCallback?: (callback: () => void) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
+
+function abortIfRequested(signal?: AbortSignal): void {
+  if (signal?.aborted)
+    throw new DOMException("AI job cancelled.", "AbortError");
+}
+
+function waitForFramePresentation(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted)
+    return Promise.reject(new DOMException("AI job cancelled.", "AbortError"));
+  const frameVideo = video as VideoWithFrameCallback;
   return new Promise((resolve, reject) => {
-    const onAbort = () => { cleanup(); reject(new DOMException("AI job cancelled.", "AbortError")); };
-    const onSeeked = async () => {
-      cleanup();
-      try { resolve(await createImageBitmap(video)); } catch (error) { reject(error); }
+    let timeout = 0;
+    let raf = 0;
+    let frameHandle: number | undefined;
+    const cleanup = () => {
+      if (timeout) window.clearTimeout(timeout);
+      if (raf) window.cancelAnimationFrame(raf);
+      if (frameHandle !== undefined) frameVideo.cancelVideoFrameCallback?.(frameHandle);
+      signal?.removeEventListener("abort", onAbort);
     };
-    const onError = () => { cleanup(); reject(new Error("Could not decode the selected AI frame.")); };
-    const cleanup = () => { video.removeEventListener("seeked", onSeeked); video.removeEventListener("error", onError); signal?.removeEventListener("abort", onAbort); };
+    const finish = () => { cleanup(); resolve(); };
+    const onAbort = () => { cleanup(); reject(new DOMException("AI job cancelled.", "AbortError")); };
     signal?.addEventListener("abort", onAbort, { once: true });
-    video.addEventListener("seeked", onSeeked, { once: true });
-    video.addEventListener("error", onError, { once: true });
-    video.currentTime = target;
+    timeout = window.setTimeout(finish, FRAME_RETRY_DELAY_MS * 2);
+    if (typeof frameVideo.requestVideoFrameCallback === "function")
+      frameHandle = frameVideo.requestVideoFrameCallback(() => finish());
+    else raf = window.requestAnimationFrame(() => finish());
   });
 }
 
+async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number, signal?: AbortSignal): Promise<void> {
+  abortIfRequested(signal);
+  const ready = () =>
+    video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0 &&
+    Math.abs(video.currentTime - target) <= 0.05;
+  if (!ready()) {
+    await new Promise<void>((resolve, reject) => {
+      let timeout = 0;
+      const cleanup = () => {
+        if (timeout) window.clearTimeout(timeout);
+        video.removeEventListener("loadeddata", onReady);
+        video.removeEventListener("canplay", onReady);
+        video.removeEventListener("seeked", onReady);
+        video.removeEventListener("timeupdate", onReady);
+        video.removeEventListener("error", onError);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const finish = () => { cleanup(); resolve(); };
+      const onReady = () => { if (ready()) finish(); };
+      const onError = () => { cleanup(); reject(new Error("Could not decode the selected AI frame.")); };
+      const onAbort = () => { cleanup(); reject(new DOMException("AI job cancelled.", "AbortError")); };
+      timeout = window.setTimeout(() => {
+        cleanup();
+        reject(new Error("Timed out while decoding the selected AI frame."));
+      }, FRAME_DECODE_TIMEOUT_MS);
+      video.addEventListener("loadeddata", onReady);
+      video.addEventListener("canplay", onReady);
+      video.addEventListener("seeked", onReady);
+      video.addEventListener("timeupdate", onReady);
+      video.addEventListener("error", onError, { once: true });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        if (Math.abs(video.currentTime - target) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
+video.currentTime = target;
+      } catch (error) {
+        cleanup();
+        reject(error);
+        return;
+      }
+      onReady();
+    });
+  }
+  await waitForFramePresentation(video, signal);
+}
+
+async function frameAt(video: HTMLVideoElement, time: number, signal?: AbortSignal): Promise<ImageBitmap> {
+  abortIfRequested(signal);
+  const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Math.max(0, time);
+  const finalFrame = Math.max(0, duration - 0.001);
+  const target = Math.max(0, Math.min(finalFrame, time));
+  await waitForDecodedVideoFrame(video, target, signal);
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas frame capture is unavailable.");
+  let lastError: unknown;
+  for (let attempt = 0; attempt < FRAME_CAPTURE_RETRIES; attempt += 1) {
+    abortIfRequested(signal);
+    try {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return await createImageBitmap(canvas);
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < FRAME_CAPTURE_RETRIES) {
+        await waitForFramePresentation(video, signal);
+        await new Promise<void>((resolve, reject) => {
+const timer = window.setTimeout(resolve, FRAME_RETRY_DELAY_MS);
+const onAbort = () => {
+  window.clearTimeout(timer);
+  signal?.removeEventListener("abort", onAbort);
+  reject(new DOMException("AI job cancelled.", "AbortError"));
+};
+signal?.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+    }
+  }
+  throw new Error(`Could not capture the decoded AI frame after ${FRAME_CAPTURE_RETRIES} attempts: ${String(lastError)}`);
+}
 function maskSettings(mask: WatermarkMask): AISettings {
   return { ...DEFAULT_AI_SETTINGS, ...loadAIDefaultSettings(), ...(mask.ai ?? {}) } as AISettings;
 }

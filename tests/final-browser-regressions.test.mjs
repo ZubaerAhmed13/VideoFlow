@@ -85,7 +85,12 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
   assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
   assert.match(ffmpeg, /FFmpeg initialization cancelled/);
-  assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
+  const aiControls = await read("components/videoflow/AIWatermarkControls.tsx");
+assert.match(aiControls, /aria-label="Run AI preview"/);
+assert.match(aiControls, /FRAME_DECODE_TIMEOUT_MS = 8_000/);
+assert.match(aiControls, /FRAME_CAPTURE_RETRIES = 4/);
+assert.match(aiControls, /context\.drawImage\(video, 0, 0, canvas\.width, canvas\.height\)/);
+assert.doesNotMatch(aiControls, /createImageBitmap\(video\)/);
 });
 
 test("moving-watermark certification fixture uses a true time expression", async () => {
