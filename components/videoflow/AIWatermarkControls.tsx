@@ -5,7 +5,7 @@ import { Activity, CheckCircle2, Cpu, LoaderCircle, Sparkles, Trash2, Upload } f
 import { Button } from "@/components/ui/button";
 import { resolveWatermarkMask } from "@/lib/videoflow/core.mjs";
 import { DEFAULT_AI_SETTINGS, effectiveAISettings, reconstructFrame } from "@/lib/videoflow/ai/AIManager";
-import { captureVideoFrame, openFrameExtractionVideo, releaseFrameExtractionVideo } from "@/lib/videoflow/ai/VideoFrameDecoder";
+import { captureVideoFrame, openFrameExtractionSession, releaseFrameExtractionSession, type FrameExtractionSession } from "@/lib/videoflow/ai/VideoFrameDecoder";
 import { resetAIWorker } from "@/lib/videoflow/ai/AIWorkerClient";
 import { compositeInpaintedROI } from "@/lib/videoflow/ai/inpainting/InpaintPostprocessor";
 import { detectAICapability } from "@/lib/videoflow/ai/AICapability";
@@ -115,14 +115,20 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
     if (cached) { setStillPreview(cached); setSegmentPreviewUrl(null); setProgress("Reused unchanged AI preview cache."); return; }
     const controller = new AbortController(); jobController.current = controller;
     setBusy(true); setError(null); setProgress("Decoding current frame…");
-    let video: HTMLVideoElement | null = null;
+    let frameSession: FrameExtractionSession | null = null;
     try {
       setProgress("Opening and priming local media decoder…");
-      const extractionVideo = await openFrameExtractionVideo(sourceUrl, controller.signal);
-      video = extractionVideo;
+      const extractionSession = await openFrameExtractionSession(
+        sourceUrl,
+        asset.proxyBlob ?? asset.blob,
+        asset.proxyBlob ? `videoflow-proxy-${asset.id}.mp4` : asset.name,
+        controller.signal,
+        setProgress,
+      );
+      frameSession = extractionSession;
       setProgress("Decoding current frame…");
       const sourceTime = clip.sourceStart + Math.max(0, playhead - clip.timelineStart) * clip.speed;
-      const bitmap = await captureVideoFrame(extractionVideo, sourceTime, controller.signal);
+      const bitmap = await captureVideoFrame(extractionSession, sourceTime, controller.signal);
       const resolved = resolveWatermarkMask(mask, playhead) as WatermarkMask;
       const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
       const context = canvas.getContext("2d")!; context.drawImage(bitmap, 0, 0);
@@ -143,7 +149,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       else setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       if (jobController.current === controller) jobController.current = null;
-      setBusy(false); if (video) releaseFrameExtractionVideo(video);
+      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);
     }
   };
 
@@ -178,11 +184,17 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
     if (!asset || !sourceUrl) { setError("Media is offline. Relink before tracking."); return; }
     const controller = new AbortController(); jobController.current = controller;
     setBusy(true); setError(null);
-    let video: HTMLVideoElement | null = null;
+    let frameSession: FrameExtractionSession | null = null;
     try {
       setProgress("Opening and priming local media decoder for tracking…");
-      const extractionVideo = await openFrameExtractionVideo(sourceUrl, controller.signal);
-      video = extractionVideo;
+      const extractionSession = await openFrameExtractionSession(
+        sourceUrl,
+        asset.proxyBlob ?? asset.blob,
+        asset.proxyBlob ? `videoflow-proxy-${asset.id}.mp4` : asset.name,
+        controller.signal,
+        setProgress,
+      );
+      frameSession = extractionSession;
       const anchor = Math.max(mask.start, Math.min(mask.end, playhead));
       const start = mode === "forward" ? anchor : mode === "backward" ? mask.start : Math.max(mask.start, Math.min(rangeStart, rangeEnd));
       const end = mode === "forward" ? mask.end : mode === "backward" ? anchor : Math.min(mask.end, Math.max(rangeStart, rangeEnd));
@@ -203,7 +215,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       const result = await trackTemplateWithWorker(
         times,
         initial,
-        async (timelineTime) => captureVideoFrame(extractionVideo, clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed, controller.signal),
+        async (timelineTime) => captureVideoFrame(extractionSession, clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed, controller.signal),
         {
           searchRadius: trackingProfile.searchRadius,
           signal: controller.signal,
@@ -233,7 +245,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       else setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       if (jobController.current === controller) jobController.current = null;
-      setBusy(false); if (video) releaseFrameExtractionVideo(video);
+      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);
     }
   };
 

@@ -310,6 +310,118 @@ async function executeWithInput(
   });
 }
 
+
+export interface FfmpegFrameExtractionSession {
+  readonly sourceSize: number;
+  capture(timeSeconds: number, signal?: AbortSignal): Promise<Blob>;
+  close(): Promise<void>;
+}
+
+export async function createFfmpegFrameExtractionSession(
+  blob: Blob,
+  sourceName: string,
+  signal?: AbortSignal,
+  onProgress?: ProgressCallback,
+): Promise<FfmpegFrameExtractionSession> {
+  if (signal?.aborted)
+    throw new DOMException("Frame extraction cancelled.", "AbortError");
+
+  let mountedInstance: FFmpeg | null = null;
+  let stagedInput: StagedInput | null = null;
+  await queueTask(async () => {
+    const instance = await getFfmpeg(onProgress, signal);
+    onProgress?.(0.03, "Mounting media for local frame decoding");
+    const mounted = await mountInput(instance, blob, sourceName, signal);
+    mountedInstance = instance;
+    stagedInput = mounted;
+  });
+
+  if (!mountedInstance || !stagedInput)
+    throw new Error("Local FFmpeg frame decoder could not mount the source media.");
+
+  const instance: FFmpeg = mountedInstance;
+  const input: StagedInput = stagedInput;
+  let closed = false;
+
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    await queueTask(async () => {
+      if (instance.loaded) await cleanupStagedInputs(instance, [input]);
+    });
+  };
+
+  const capture = async (timeSeconds: number, captureSignal?: AbortSignal): Promise<Blob> =>
+    queueTask(async () => {
+      if (closed) throw new Error("Local FFmpeg frame decoder session is closed.");
+      if (captureSignal?.aborted)
+        throw new DOMException("Frame extraction cancelled.", "AbortError");
+      if (!instance.loaded || ffmpeg !== instance)
+        throw new Error("Local FFmpeg frame decoder was reset and must be reopened.");
+
+      const outputName = uniqueName("frame", "png");
+      const logs: string[] = [];
+      const logListener = ({ message }: { message: string }) => {
+        logs.push(message);
+        if (logs.length > 12) logs.shift();
+      };
+      const abort = () => {
+        closed = true;
+        if (ffmpeg === instance) {
+          instance.terminate();
+          ffmpeg = null;
+          loadPromise = null;
+        }
+      };
+      captureSignal?.addEventListener("abort", abort, { once: true });
+      instance.on("log", logListener);
+      try {
+        const safeTime = Math.max(0, Number.isFinite(timeSeconds) ? timeSeconds : 0);
+        onProgress?.(0.15, "Decoding frame with local FFmpeg fallback");
+        const exitCode = await instance.exec(
+          [
+            "-hide_banner",
+            "-loglevel", "error",
+            "-ss", safeTime.toFixed(6),
+            "-i", input.path,
+            "-map", "0:v:0",
+            "-frames:v", "1",
+            "-an",
+            "-c:v", "png",
+            "-f", "image2",
+            outputName,
+          ],
+          -1,
+          captureSignal ? { signal: captureSignal } : undefined,
+        );
+        if (captureSignal?.aborted)
+          throw new DOMException("Frame extraction cancelled.", "AbortError");
+        if (exitCode !== 0)
+          throw new Error(logs.at(-1) || `FFmpeg frame extraction exited with code ${exitCode}.`);
+        const data = await instance.readFile(
+          outputName,
+          undefined,
+          captureSignal ? { signal: captureSignal } : undefined,
+        );
+        const result = bytesToBlob(data, "image/png");
+        if (result.size < 128)
+          throw new Error("FFmpeg frame extraction returned an empty image.");
+        onProgress?.(1, "Local FFmpeg frame decoded");
+        return result;
+      } catch (error) {
+        if (captureSignal?.aborted)
+          throw new DOMException("Frame extraction cancelled.", "AbortError");
+        throw error instanceof Error ? error : new Error(String(error));
+      } finally {
+        captureSignal?.removeEventListener("abort", abort);
+        instance.off("log", logListener);
+        if (instance.loaded) await deleteQuietly(instance, [outputName]);
+      }
+    });
+
+  return { sourceSize: blob.size, capture, close };
+}
+
 export async function transcodeMedia(
   blob: Blob,
   sourceName: string,
