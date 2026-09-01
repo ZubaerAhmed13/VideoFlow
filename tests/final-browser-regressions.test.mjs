@@ -87,13 +87,22 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(ffmpeg, /FFmpeg initialization cancelled/);
   const aiControls = await read("components/videoflow/AIWatermarkControls.tsx");
 assert.match(aiControls, /aria-label="Run AI preview"/);
-assert.match(aiControls, /FRAME_DECODE_TIMEOUT_MS = 8_000/);
-assert.match(aiControls, /FRAME_CAPTURE_RETRIES = 4/);
-assert.match(aiControls, /const decodeTarget =/);
-assert.match(aiControls, /Math\.max\(0\.001, target \+ 0\.001\)/);
-assert.match(aiControls, /video\.currentTime = decodeTarget/);
-assert.match(aiControls, /context\.drawImage\(video, 0, 0, canvas\.width, canvas\.height\)/);
-assert.doesNotMatch(aiControls, /createImageBitmap\(video\)/);
+assert.equal((aiControls.match(/await openFrameExtractionVideo\(sourceUrl/g) ?? []).length, 2);
+assert.equal((aiControls.match(/releaseFrameExtractionVideo\(video\)/g) ?? []).length, 2);
+assert.match(aiControls, /captureVideoFrame\(extractionVideo, sourceTime/);
+const decoder = await read("lib/videoflow/ai/VideoFrameDecoder.ts");
+assert.match(decoder, /MEDIA_METADATA_TIMEOUT_MS = 8_000/);
+assert.match(decoder, /MEDIA_PASSIVE_DECODE_TIMEOUT_MS = 1_500/);
+assert.match(decoder, /MEDIA_PLAY_PRIME_TIMEOUT_MS = 2_500/);
+assert.match(decoder, /MEDIA_SEEK_PRIME_TIMEOUT_MS = 2_500/);
+assert.match(decoder, /FRAME_DECODE_TIMEOUT_MS = 8_000/);
+assert.match(decoder, /FRAME_CAPTURE_RETRIES = 4/);
+assert.match(decoder, /document\.body\.appendChild\(video\)/);
+assert.match(decoder, /void video\.play\(\)\.catch/);
+assert.match(decoder, /video\.pause\(\)/);
+assert.match(decoder, /PRIME_SEEK_SECONDS = 1 \/ 30/);
+assert.match(decoder, /context\.drawImage\(video, 0, 0, canvas\.width, canvas\.height\)/);
+assert.doesNotMatch(decoder, /createImageBitmap\(video\)/);
 });
 
 test("moving-watermark certification fixture uses a true time expression", async () => {
