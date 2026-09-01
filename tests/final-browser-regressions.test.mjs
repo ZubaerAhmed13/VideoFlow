@@ -19,18 +19,44 @@ test("export range follows newly imported project duration", async () => {
   assert.match(source, /rangeEnd: fullDuration/);
 });
 
-test("ONNX execution is threaded when isolated and remains bounded inside a worker", async () => {
+test("ONNX execution adaptively supervises threaded WASM inside a killable worker", async () => {
   const worker = await read("workers/ai-inference.worker.ts");
   const client = await read("lib/videoflow/ai/AIWorkerClient.ts");
   const engine = await read("lib/videoflow/ai/AIInferenceEngine.ts");
-  assert.match(worker, /self\.crossOriginIsolated[\s\S]*\? Math\.max\(1, Math\.min\(4,[\s\S]*: 1/);
+
+  // Thread selection is capability-driven: isolation permits a bounded thread
+  // pool, while the caller can explicitly constrain a rebuilt worker to one.
+  assert.match(worker, /function resolveWasmThreadCount\(data: InitRequest\)/);
+  assert.match(worker, /if \(!self\.crossOriginIsolated\) return 1/);
+  assert.match(worker, /data\.maxWasmThreads/);
+  assert.match(worker, /runtime\.env\.wasm\.numThreads = wasmThreads/);
+  assert.match(worker, /wasmThreads: active\.wasmThreads/);
+  assert.match(worker, /wasmThreads: response\.wasmThreads/);
   assert.match(worker, /runtime\.env\.wasm\.proxy = false/);
   assert.match(worker, /graphOptimizationLevel: "all"/);
   assert.match(worker, /executionMode: "sequential"/);
   assert.match(worker, /reportStage\(data\.id, "inference-running"\)/);
+
+  // A genuine stalled threaded WASM inference is treated as runtime evidence,
+  // not as a browser-name heuristic. It is terminated and retried exactly once
+  // in a fresh single-thread worker, with the stable profile remembered per tab.
+  assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 75_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
   assert.match(client, /AIWorkerWatchdogError/);
   assert.match(client, /while \$\{current\.stage\}/);
+  assert.match(client, /function shouldDowngradeThreadedWasm/);
+  assert.match(client, /error\.operation === "infer"/);
+  assert.match(client, /error\.stage === "inference-running"/);
+  assert.match(client, /error\.provider === "wasm"/);
+  assert.match(client, /error\.wasmThreads > 1/);
+  assert.match(client, /persistSingleThreadWasmProfile\(\)/);
+  assert.match(client, /sessionStorage\.setItem\(WASM_THREAD_PROFILE_KEY, "1"\)/);
+  assert.match(client, /maxWasmThreads: plan\.maxWasmThreads/);
+  assert.doesNotMatch(client, /navigator\.userAgent|\bFirefox\b|\bGecko\b/);
+
+  // The UI-facing engine never owns an ONNX session. Even recovery remains
+  // entirely inside terminable workers, so no watchdog can migrate a stalled
+  // neural run onto the main thread.
   assert.doesNotMatch(engine, /session\.run\(/);
   assert.doesNotMatch(engine, /runImageInpaintingMainThread/);
   assert.match(engine, /requires Web Worker support so ONNX inference remains isolated, cancellable, and bounded/);
