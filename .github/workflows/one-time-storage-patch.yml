@@ -33,10 +33,10 @@ jobs:
           match = matches[0]
           indent = match.group("indent")
           replacement = "\n".join([
-              f'{indent}if (storage.mode === "persisted")',
-              f'{indent}  void navigator.storage?.persist?.().catch(() => undefined);',
-              f'{indent}markImportStage(`Saving ${{file.name}} as ${{storage.mode}}`);',
-              f'{indent}await saveAsset(asset);',
+              indent + 'if (storage.mode === "persisted")',
+              indent + '  void navigator.storage?.persist?.().catch(() => undefined);',
+              indent + 'markImportStage(`Saving ${file.name} as ${storage.mode}`);',
+              indent + 'await saveAsset(asset);',
           ])
           app_path.write_text(app[:match.start()] + replacement + app[match.end():])
 
