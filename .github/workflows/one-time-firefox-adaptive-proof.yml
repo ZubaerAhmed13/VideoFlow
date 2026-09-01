@@ -1,0 +1,45 @@
+name: One-time Firefox adaptive inference proof
+
+on:
+  push:
+    branches:
+      - verify/firefox-adaptive-49
+
+permissions:
+  contents: read
+
+jobs:
+  firefox-ai:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Restore split release assets
+        run: npm run restore:large-assets -- --if-present
+      - name: Install dependencies
+        run: npm ci
+      - name: Install fixture encoder
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Generate deterministic fixtures
+        run: npm run fixtures
+      - name: Stage checksum-pinned local AI pack
+        run: bash scripts/stage-ai-pack-ci.sh
+      - name: Build production distribution
+        run: |
+          rm -rf dist
+          npm run build
+      - name: Install Firefox
+        run: npx playwright install --with-deps firefox
+      - name: Genuine Firefox AI preview, tracking and offline reuse
+        run: npx playwright test tests/e2e/videoflow.spec.ts --project=firefox --grep "bundled AI executes a genuine local neural preview with tracking and offline reuse"
+      - name: Upload Firefox evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firefox-adaptive-proof
+          path: playwright-report
+          if-no-files-found: ignore
