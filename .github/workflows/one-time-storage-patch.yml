@@ -24,44 +24,54 @@ jobs:
 
           app_path = Path("components/videoflow/VideoFlowApp.tsx")
           app = app_path.read_text()
-          old = '''            if (storage.mode === "persisted") await navigator.storage?.persist?.();
-            await saveAsset(asset);'''
-          new = '''            if (storage.mode === "persisted")
-              void navigator.storage?.persist?.().catch(() => undefined);
-            markImportStage(`Saving ${file.name} as ${storage.mode}`);
-            await saveAsset(asset);'''
-          if app.count(old) != 1:
-              raise SystemExit(f"Expected exactly one blocking persistence call, found {app.count(old)}")
-          app_path.write_text(app.replace(old, new, 1))
+          pattern = re.compile(
+              r'(?m)^(?P<indent>[ \t]*)if \(storage\.mode === "persisted"\) await navigator\.storage\?\.persist\?\.\(\);\n(?P=indent)await saveAsset\(asset\);$'
+          )
+          matches = list(pattern.finditer(app))
+          if len(matches) != 1:
+              raise SystemExit(f"Expected exactly one blocking persistence call, found {len(matches)}")
+          match = matches[0]
+          indent = match.group("indent")
+          replacement = "\n".join([
+              f'{indent}if (storage.mode === "persisted")',
+              f'{indent}  void navigator.storage?.persist?.().catch(() => undefined);',
+              f'{indent}markImportStage(`Saving ${{file.name}} as ${{storage.mode}}`);',
+              f'{indent}await saveAsset(asset);',
+          ])
+          app_path.write_text(app[:match.start()] + replacement + app[match.end():])
 
           test_path = Path("tests/final-browser-regressions.test.mjs")
           tests = test_path.read_text()
-          replacement = '''test("release dialogs and cross-browser imports remain bounded", async () => {
-            assert.match(await read("app/globals.css"), /\\.vf-export-dialog[\\s\\S]*max-height: calc\\(100dvh - 32px\\)[\\s\\S]*overflow-y: auto/);
-            const media = await read("lib/videoflow/media.ts");
-            assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
-            assert.match(media, /probeMediaBlob\\(file, file\\.name, controller\\.signal\\)/);
-            assert.match(media, /controller\\.abort\\(\\)/);
-            assert.match(media, /STORAGE_ESTIMATE_TIMEOUT_MS = 1_000/);
-            assert.match(media, /const estimatePromise = navigator\\.storage\\?\\.estimate\\?\\.\\(\\)/);
-            assert.match(media, /estimateFreeDecision\\.mode !== "persisted"/);
-            const app = await read("components/videoflow/VideoFlowApp.tsx");
-            assert.ok(app.includes('if (storage.mode === "persisted")\\n              void navigator.storage?.persist?.().catch(() => undefined);'));
-            assert.doesNotMatch(app, /await navigator\\.storage\\?\\.persist\\?\\.\\(\\)/);
-            assert.ok(app.includes('markImportStage(`Saving ${file.name} as ${storage.mode}`);'));
-            const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
-            assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
-            assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
-            assert.match(ffmpeg, /FFmpeg initialization cancelled/);
-            assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
-          });
-
-          '''
-          pattern = r'test\("release dialogs and cross-browser imports remain bounded", async \(\) => \{.*?\n\}\);\n\n(?=test\("moving-watermark certification fixture uses a true time expression")'
-          updated, count = re.subn(pattern, replacement, tests, count=1, flags=re.S)
-          if count != 1:
-              raise SystemExit(f"Expected exactly one browser-regression test block, found {count}")
-          test_path.write_text(updated)
+          start_marker = 'test("release dialogs and cross-browser imports remain bounded", async () => {'
+          end_marker = 'test("moving-watermark certification fixture uses a true time expression"'
+          if tests.count(start_marker) != 1 or tests.count(end_marker) != 1:
+              raise SystemExit("Browser-regression test anchors are not unique")
+          start = tests.index(start_marker)
+          end = tests.index(end_marker)
+          replacement_test = "\n".join([
+              'test("release dialogs and cross-browser imports remain bounded", async () => {',
+              '  assert.match(await read("app/globals.css"), /\\.vf-export-dialog[\\s\\S]*max-height: calc\\(100dvh - 32px\\)[\\s\\S]*overflow-y: auto/);',
+              '  const media = await read("lib/videoflow/media.ts");',
+              '  assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);',
+              '  assert.match(media, /probeMediaBlob\\(file, file\\.name, controller\\.signal\\)/);',
+              '  assert.match(media, /controller\\.abort\\(\\)/);',
+              '  assert.match(media, /STORAGE_ESTIMATE_TIMEOUT_MS = 1_000/);',
+              '  assert.match(media, /const estimatePromise = navigator\\.storage\\?\\.estimate\\?\\.\\(\\)/);',
+              '  assert.match(media, /estimateFreeDecision\\.mode !== "persisted"/);',
+              '  const app = await read("components/videoflow/VideoFlowApp.tsx");',
+              '  assert.ok(app.includes(\'if (storage.mode === "persisted")\\n              void navigator.storage?.persist?.().catch(() => undefined);\'));',
+              '  assert.doesNotMatch(app, /await navigator\\.storage\\?\\.persist\\?\\.\\(\\)/);',
+              '  assert.ok(app.includes(\'markImportStage(`Saving ${file.name} as ${storage.mode}`);\'));',
+              '  const ffmpeg = await read("lib/videoflow/ffmpeg.ts");',
+              '  assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);',
+              '  assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);',
+              '  assert.match(ffmpeg, /FFmpeg initialization cancelled/);',
+              '  assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);',
+              '});',
+              '',
+              '',
+          ])
+          test_path.write_text(tests[:start] + replacement_test + tests[end:])
           PY
 
           git config user.name "github-actions[bot]"
