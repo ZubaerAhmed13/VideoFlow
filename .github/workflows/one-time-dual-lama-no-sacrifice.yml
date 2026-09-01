@@ -68,6 +68,14 @@ jobs:
               cert = cert.replace(old, new)
           cert_path.write_text(cert)
 
+          controls_path = Path("components/videoflow/AIWatermarkControls.tsx")
+          controls = controls_path.read_text()
+          old_controls = 'Bundled AI pack installed locally; both model checksums verified.'
+          new_controls = 'Bundled AI pack installed locally — checksum verified for both models.'
+          if controls.count(old_controls) != 1:
+              raise SystemExit(f"expected one AI controls bundled status, found {controls.count(old_controls)}")
+          controls_path.write_text(controls.replace(old_controls, new_controls))
+
           regression_path = Path("tests/final-browser-regressions.test.mjs")
           regression = regression_path.read_text()
           old_init = 'assert.match(client, /initialize\\([\\s\\S]*timeoutWithinDeadline\\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\\)/);'
