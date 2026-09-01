@@ -40,8 +40,22 @@ test("ONNX execution adaptively supervises threaded WASM inside a killable worke
   // A genuine stalled threaded WASM inference is treated as runtime evidence,
   // not as a browser-name heuristic. It is terminated and retried exactly once
   // in a fresh single-thread worker, with the stable profile remembered per tab.
-  assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 75_000/);
+  assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
+  assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
+  assert.match(client, /timeoutWithinDeadline/);
+  assert.match(client, /initialize\([\s\S]*timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\)/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer"\)/);
+  const constantMs = (name) => {
+    const match = client.match(new RegExp(`const ${name} = ([\\d_]+);`));
+    assert.ok(match, `Missing ${name}`);
+    return Number(match[1].replaceAll("_", ""));
+  };
+  assert.ok(
+    constantMs("WORKER_THREADED_PROBE_TIMEOUT_MS") + constantMs("WORKER_INFERENCE_TIMEOUT_MS")
+      < constantMs("WORKER_INTERACTIVE_BUDGET_MS"),
+    "Adaptive recovery must reserve deadline time for worker rebuild/session initialization.",
+  );
   assert.match(client, /AIWorkerWatchdogError/);
   assert.match(client, /while \$\{current\.stage\}/);
   assert.match(client, /function shouldDowngradeThreadedWasm/);
