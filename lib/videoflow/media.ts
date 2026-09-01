@@ -58,6 +58,7 @@ function kindForFile(file: File, signature: string): MediaKind | null {
 }
 
 const OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000;
+const STORAGE_ESTIMATE_TIMEOUT_MS = 1_000;
 
 async function optionalTechnicalProbe(file: File): Promise<MediaProbe | undefined> {
   const { probeMediaBlob } = await import("./ffmpeg");
@@ -225,16 +226,40 @@ export async function inspectFile(
   }
 }
 
+async function boundedStorageEstimate(): Promise<StorageEstimate | undefined> {
+  let timer = 0;
+  try {
+    const estimatePromise = navigator.storage?.estimate?.();
+    if (!estimatePromise) return undefined;
+    return await Promise.race([
+      estimatePromise,
+      new Promise<undefined>((resolve) => {
+        timer = window.setTimeout(
+          () => resolve(undefined),
+          STORAGE_ESTIMATE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
+}
+
 export async function decideFileStorage(
   fileSize: number,
   options: { hasPersistentHandle?: boolean; forceReference?: boolean } = {},
 ) {
-  let estimate: StorageEstimate | undefined;
-  try {
-    estimate = await navigator.storage?.estimate?.();
-  } catch {
-    estimate = undefined;
-  }
+  // Decisions that are already reference/session based do not need an
+  // optional quota lookup at all. This is especially important for very
+  // large media where browser storage should never receive the original.
+  const estimateFreeDecision = assessImportStorage(fileSize, {}, options);
+  if (estimateFreeDecision.mode !== "persisted") return estimateFreeDecision;
+
+  // StorageManager.estimate() is advisory. Some browser/CI combinations can
+  // leave its promise unresolved, so never allow it to block media import.
+  const estimate = await boundedStorageEstimate();
   return assessImportStorage(fileSize, estimate, options);
 }
 
