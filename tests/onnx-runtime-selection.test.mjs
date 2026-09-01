@@ -4,6 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
+function constantMs(source, name) {
+  const match = source.match(new RegExp(`const ${name} = ([\\d_]+);`));
+  assert.ok(match, `Missing ${name}`);
+  return Number(match[1].replaceAll("_", ""));
+}
+
 test("ONNX execution stays supervised and adaptively recovers from stalled threaded WASM", async () => {
   const client = await read("lib/videoflow/ai/AIWorkerClient.ts");
   const engine = await read("lib/videoflow/ai/AIInferenceEngine.ts");
@@ -17,9 +23,25 @@ test("ONNX execution stays supervised and adaptively recovers from stalled threa
   assert.match(client, /useWebgpu/);
   assert.match(client, /const providers: AIProvider\[\] = useWebgpu \? \["webgpu", "wasm"\] : \["wasm"\]/);
   assert.match(client, /WORKER_INIT_TIMEOUT_MS = 45_000/);
-  assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 75_000/);
+  assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
+  assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
+  assert.match(client, /WORKER_MIN_TIMEOUT_SLICE_MS = 1_000/);
   assert.match(client, /AIWorkerWatchdogError/);
+
+  // The adaptive path must fit inside one product-level interactive deadline.
+  // A short threaded viability probe leaves enough time for a full bounded
+  // single-thread retry plus worker rebuild/session initialization overhead.
+  const interactiveBudget = constantMs(client, "WORKER_INTERACTIVE_BUDGET_MS");
+  const threadedProbe = constantMs(client, "WORKER_THREADED_PROBE_TIMEOUT_MS");
+  const fallbackInference = constantMs(client, "WORKER_INFERENCE_TIMEOUT_MS");
+  assert.ok(threadedProbe + fallbackInference < interactiveBudget);
+  assert.ok(interactiveBudget - threadedProbe - fallbackInference >= 10_000);
+  assert.match(client, /const deadline = performance\.now\(\) \+ WORKER_INTERACTIVE_BUDGET_MS/);
+  assert.match(client, /function timeoutWithinDeadline/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\)/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer"\)/);
+  assert.match(client, /Math\.min\(WORKER_INIT_TIMEOUT_MS, timeoutMs\)/);
 
   // Thread capability is learned from actual execution rather than UA sniffing.
   assert.match(client, /shouldDowngradeThreadedWasm/);
