@@ -25,17 +25,30 @@ try {
     ? join(root, "dist", "client")
     : join(root, "dist");
   const precache = JSON.parse(readFileSync(join(output, "precache-manifest.json"), "utf8"));
-  const paths = [...precache, "./models/lama-512-int8.onnx", "./models/lama-512-int8.model.json", "./service-worker.js"];
+  const paths = [...precache, "./models/lama-512-int8.onnx", "./models/lama-512-int8.model.json", "./coi-bootstrap.js", "./service-worker.js"];
   const results = [];
   for (const path of paths) {
     const response = await fetch(new URL(String(path).replace(/^\.\//, ""), base));
     const wasm = String(path).endsWith(".wasm");
     const magic = wasm ? [...new Uint8Array(await response.arrayBuffer()).subarray(0, 4)] : undefined;
-    results.push({ path, status: response.status, type: response.headers.get("content-type"), magic });
+    results.push({
+      path,
+      status: response.status,
+      type: response.headers.get("content-type"),
+      opener: response.headers.get("cross-origin-opener-policy"),
+      embedder: response.headers.get("cross-origin-embedder-policy"),
+      resource: response.headers.get("cross-origin-resource-policy"),
+      magic,
+    });
     if (!wasm) await response.body?.cancel();
   }
   const failed = results.filter((result) => result.status !== 200);
   if (failed.length) throw new Error(`Nested-path assets failed: ${JSON.stringify(failed)}`);
+  const isolationFailures = results.filter((result) =>
+    result.opener !== "same-origin" || result.embedder !== "require-corp" || result.resource !== "same-origin");
+  if (isolationFailures.length) {
+    throw new Error(`Nested-path assets are missing cross-origin isolation headers: ${JSON.stringify(isolationFailures)}`);
+  }
   const wasm = results.filter((result) => String(result.path).endsWith(".wasm"));
   if (!wasm.length || wasm.some((result) => result.type !== "application/wasm")) {
     throw new Error("Nested-path WASM assets have an invalid MIME type.");
@@ -43,7 +56,7 @@ try {
   if (wasm.some((result) => JSON.stringify(result.magic) !== JSON.stringify([0, 97, 115, 109]))) {
     throw new Error("Nested-path WASM response did not contain WebAssembly bytes.");
   }
-  console.log(`Nested HTTP verification passed: ${results.length} production assets under /VideoFlow/.`);
+  console.log(`Nested HTTP verification passed: ${results.length} production assets under /VideoFlow/ with COOP/COEP isolation.`);
 } finally {
   server.kill("SIGTERM");
   await new Promise((resolve) => server.once("exit", resolve));

@@ -322,10 +322,32 @@ async function bitmapFromImageBlob(blob: Blob, signal?: AbortSignal): Promise<Im
   }
 }
 
+function recoverableFfmpegFrameError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return /ErrnoError|FS error|filesystem|frame decoder was reset|session is closed/i.test(message);
+}
+
 async function captureFfmpegFrame(session: FrameExtractionSession, time: number, signal?: AbortSignal): Promise<ImageBitmap> {
   await openFfmpegFallback(session, signal);
-  const image = await session.ffmpegSession!.capture(time, signal);
-  return bitmapFromImageBlob(image, signal);
+  try {
+    const image = await session.ffmpegSession!.capture(time, signal);
+    return bitmapFromImageBlob(image, signal);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (!recoverableFfmpegFrameError(error) || !session.sourceBlob) throw error;
+
+    // A persistent ffmpeg.wasm filesystem can occasionally become invalid
+    // after many seek/capture cycles. Rebuild the decoder session once from
+    // the same Blob/WORKERFS source instead of retrying against corrupt state.
+    session.onPhase?.("Local FFmpeg filesystem state fault; rebuilding decoder session…");
+    const failedSession = session.ffmpegSession;
+    session.ffmpegSession = null;
+    await failedSession?.close().catch(() => undefined);
+    abortIfRequested(signal);
+    await openFfmpegFallback(session, signal);
+    const image = await session.ffmpegSession!.capture(time, signal);
+    return bitmapFromImageBlob(image, signal);
+  }
 }
 
 export async function captureVideoFrame(

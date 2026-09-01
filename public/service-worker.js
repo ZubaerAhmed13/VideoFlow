@@ -1,15 +1,32 @@
-const CACHE_BUILD = "videoflow-pwa9";
+const CACHE_BUILD = "videoflow-pwa10-coi";
 const BASE = new URL("./", self.registration.scope);
 const appUrl = (path) => new URL(path, BASE).href;
 const CORE_SHELL = [
   appUrl("./"),
   appUrl("manifest.webmanifest"),
   appUrl("favicon.svg"),
+  appUrl("coi-bootstrap.js"),
   appUrl("precache-manifest.json"),
   appUrl("vendor/ffmpeg/ffmpeg-core.js"),
   appUrl("vendor/ffmpeg/ffmpeg-core.wasm"),
 ];
 const isProtectedCache = (key) => key.startsWith("videoflow-ai-");
+const ISOLATION_HEADERS = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
+
+function isolatedResponse(response) {
+  if (!response) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(ISOLATION_HEADERS)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 async function generatedShell() {
   try {
@@ -40,19 +57,21 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) return;
-  event.respondWith(
-    caches.match(event.request).then(
-      (cached) => cached || fetch(event.request)
-        .then((response) => {
-          if (response.ok && !event.request.url.startsWith("blob:") && !/\/models\/.*\.onnx(?:$|\?)/i.test(event.request.url)) {
-            const copy = response.clone();
-            event.waitUntil(caches.open(CACHE_BUILD).then((cache) => cache.put(event.request, copy)));
-          }
-          return response;
-        })
-        .catch(() => caches.match(appUrl("./"))),
-    ),
-  );
+  event.respondWith((async () => {
+    const cached = await caches.match(event.request);
+    if (cached) return isolatedResponse(cached);
+    try {
+      const response = await fetch(event.request);
+      if (response.ok && !event.request.url.startsWith("blob:") && !/\/models\/.*\.onnx(?:$|\?)/i.test(event.request.url)) {
+        const copy = response.clone();
+        event.waitUntil(caches.open(CACHE_BUILD).then((cache) => cache.put(event.request, copy)));
+      }
+      return isolatedResponse(response);
+    } catch {
+      const shell = await caches.match(appUrl("./"));
+      return shell ? isolatedResponse(shell) : Response.error();
+    }
+  })());
 });
 
 self.addEventListener("message", (event) => {

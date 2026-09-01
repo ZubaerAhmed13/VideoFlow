@@ -49,6 +49,7 @@ jobs:
         run: npm run verify:nested
       - name: Unit, architecture, static-dist and fragmented-media tests
         run: |
+          set -o pipefail
           mkdir -p ci-results
           npm run test:unit | tee ci-results/unit.log
       - name: Media quality and colour fidelity gate

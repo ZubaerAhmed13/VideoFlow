@@ -4,9 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("static test server serves module runtime with JavaScript MIME", async () => {
+test("static test server serves module runtime with JavaScript MIME and cross-origin isolation", async () => {
   const server = await read("scripts/serve-dist.mjs");
   assert.match(server, /"\.mjs": "text\/javascript; charset=utf-8"/);
+  assert.match(server, /"Cross-Origin-Opener-Policy": "same-origin"/);
+  assert.match(server, /"Cross-Origin-Embedder-Policy": "require-corp"/);
+  assert.match(server, /"Cross-Origin-Resource-Policy": "same-origin"/);
   assert.match(server, /writeHead\(404/);
 });
 
@@ -16,17 +19,50 @@ test("export range follows newly imported project duration", async () => {
   assert.match(source, /rangeEnd: fullDuration/);
 });
 
-test("ONNX WASM falls back to one thread without cross-origin isolation", async () => {
-  assert.match(await read("workers/ai-inference.worker.ts"), /self\.crossOriginIsolated[^\n]+: 1/);
-  assert.match(await read("lib/videoflow/ai/AIInferenceEngine.ts"), /globalThis\.crossOriginIsolated[^\n]+: 1/);
+test("ONNX execution is threaded when isolated and remains bounded inside a worker", async () => {
+  const worker = await read("workers/ai-inference.worker.ts");
+  const client = await read("lib/videoflow/ai/AIWorkerClient.ts");
+  const engine = await read("lib/videoflow/ai/AIInferenceEngine.ts");
+  assert.match(worker, /self\.crossOriginIsolated[\s\S]*\? Math\.max\(1, Math\.min\(4,[\s\S]*: 1/);
+  assert.match(worker, /runtime\.env\.wasm\.proxy = false/);
+  assert.match(worker, /graphOptimizationLevel: "all"/);
+  assert.match(worker, /executionMode: "sequential"/);
+  assert.match(worker, /reportStage\(data\.id, "inference-running"\)/);
+  assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 120_000/);
+  assert.match(client, /AIWorkerWatchdogError/);
+  assert.match(client, /while \$\{current\.stage\}/);
+  assert.doesNotMatch(engine, /session\.run\(/);
+  assert.doesNotMatch(engine, /runImageInpaintingMainThread/);
+  assert.match(engine, /requires Web Worker support so ONNX inference remains isolated, cancellable, and bounded/);
+});
+
+test("GitHub Pages shell can establish cross-origin isolation without a custom server", async () => {
+  const sw = await read("public/service-worker.js");
+  const bootstrap = await read("public/coi-bootstrap.js");
+  const layout = await read("app/layout.tsx");
+  assert.match(sw, /videoflow-pwa10-coi/);
+  assert.match(sw, /Cross-Origin-Opener-Policy/);
+  assert.match(sw, /Cross-Origin-Embedder-Policy/);
+  assert.match(sw, /Cross-Origin-Resource-Policy/);
+  assert.match(sw, /isolatedResponse\(cached\)/);
+  assert.match(bootstrap, /navigator\.serviceWorker\.register/);
+  assert.match(bootstrap, /SKIP_WAITING/);
+  assert.match(bootstrap, /videoflow-coi-reload-v1/);
+  assert.match(layout, /<script src="\.\/coi-bootstrap\.js"/);
 });
 
 test("nested browser runtimes resolve local ESM and WASM companions explicitly", async () => {
   assert.match(await read("scripts/copy-ffmpeg-assets.mjs"), /@ffmpeg\/core\/dist\/esm/);
-  assert.match(await read("lib/videoflow/ai/AIInferenceEngine.ts"), /wasmPaths = deploymentAssetUrl\("vendor\/onnx\/"\)/);
-  assert.match(await read("workers/ai-inference.worker.ts"), /runtime\.env\.wasm\.wasmPaths = data\.wasmBaseUrl/);
+  const worker = await read("workers/ai-inference.worker.ts");
+  const client = await read("lib/videoflow/ai/AIWorkerClient.ts");
+  assert.match(worker, /runtime\.env\.wasm\.wasmPaths = data\.wasmBaseUrl/);
+  assert.match(client, /ort\.wasm\.bundle\.min\.mjs/);
+  assert.match(client, /ort\.webgpu\.bundle\.min\.mjs/);
   assert.match(await read("scripts/verify-release.mjs"), /export default createFFmpegCore/);
-  assert.match(await read("scripts/verify-nested-http.mjs"), /WebAssembly bytes/);
+  const nested = await read("scripts/verify-nested-http.mjs");
+  assert.match(nested, /WebAssembly bytes/);
+  assert.match(nested, /cross-origin-opener-policy/);
+  assert.match(nested, /cross-origin-embedder-policy/);
   const staging = await read("scripts/stage-ai-pack-ci.sh");
   const installer = await read("lib/videoflow/ai/AIRuntimeInstaller.ts");
   for (const variant of ["asyncify", "jsep", "jspi"]) {
@@ -67,7 +103,6 @@ test("Firefox browser matrix uses native Ogg Theora Vorbis fixtures", async () =
   assert.match(media, /ogv\|ogm/);
 });
 
-
 test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(await read("app/globals.css"), /\.vf-export-dialog[\s\S]*max-height: calc\(100dvh - 32px\)[\s\S]*overflow-y: auto/);
   const media = await read("lib/videoflow/media.ts");
@@ -102,6 +137,9 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(decoder, /createFfmpegFrameExtractionSession/);
   assert.match(decoder, /Native decoder unavailable; switching to local FFmpeg frame decoder/);
   assert.match(decoder, /Native frame capture failed; switching to local FFmpeg frame decoder/);
+  assert.match(decoder, /recoverableFfmpegFrameError/);
+  assert.match(decoder, /Local FFmpeg filesystem state fault; rebuilding decoder session/);
+  assert.match(decoder, /failedSession\?\.close\(\)\.catch/);
   assert.match(decoder, /document\.body\.appendChild\(video\)/);
   assert.match(decoder, /context\.drawImage\(video, 0, 0, canvas\.width, canvas\.height\)/);
   assert.doesNotMatch(decoder, /createImageBitmap\(video\)/);
@@ -113,6 +151,11 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(ffmpeg, /"-ss", safeTime\.toFixed\(6\)/);
   assert.match(ffmpeg, /"-frames:v", "1"/);
   assert.match(ffmpeg, /bytesToBlob\(data, "image\/png"\)/);
+});
+
+test("release workflow cannot hide a unit failure behind tee", async () => {
+  const workflow = await read(".github/workflows/release-verification.yml");
+  assert.match(workflow, /set -o pipefail[\s\S]*npm run test:unit \| tee ci-results\/unit\.log/);
 });
 
 test("moving-watermark certification fixture uses a true time expression", async () => {

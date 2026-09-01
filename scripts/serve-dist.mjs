@@ -44,6 +44,9 @@ createServer((request, response) => {
     "Content-Type": mime[extname(target)] ?? "application/octet-stream",
     "Cache-Control": "no-cache",
     "Service-Worker-Allowed": "/VideoFlow/",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp",
+    "Cross-Origin-Resource-Policy": "same-origin",
   });
   createReadStream(target).pipe(response);
 }).listen(port, "127.0.0.1", () => {
