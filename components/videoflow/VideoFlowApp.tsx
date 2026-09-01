@@ -1264,7 +1264,9 @@ export function VideoFlowApp() {
           }
           asset.storageMode = storage.mode;
           try {
-            if (storage.mode === "persisted") await navigator.storage?.persist?.();
+            if (storage.mode === "persisted")
+              void navigator.storage?.persist?.().catch(() => undefined);
+            markImportStage(`Saving ${file.name} as ${storage.mode}`);
             await saveAsset(asset);
           } catch {
             asset.storageMode = "session";
