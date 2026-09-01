@@ -24,8 +24,10 @@ def replace(path: str, old: str, new: str, expected: int = 1) -> None:
 # ---------------------------------------------------------------------------
 # 1. FFmpeg frame extraction: preserve exact source/proxy resolution and the
 #    existing sampled cadence, but amortize decoder seek/startup over a bounded
-#    four-frame batch. Irregular timestamp groups safely retain the old exact
-#    per-frame path instead of approximating them.
+#    four-frame batch. Tiny/end-boundary batches use exact seeks on the same
+#    mounted session. Larger regular batches verify every produced image and
+#    transactionally fall back to exact extraction if image2 omits a boundary
+#    frame. A true FS fault still propagates to the decoder's session rebuild.
 # ---------------------------------------------------------------------------
 replace(
     "lib/videoflow/ffmpeg.ts",
@@ -53,7 +55,14 @@ batch_impl = r'''
 
   const captureBatch = async (timesSeconds: number[], captureSignal?: AbortSignal): Promise<Blob[]> => {
     if (!timesSeconds.length) return [];
-    if (timesSeconds.length === 1) return [await capture(timesSeconds[0], captureSignal)];
+    if (timesSeconds.length <= 2) {
+      // Two-frame groups commonly contain the exact tracking-range endpoint.
+      // image2/fps may legally emit only one file when that endpoint is at EOF,
+      // so keep these tiny groups exact while still reusing the mounted source.
+      const exact: Blob[] = [];
+      for (const time of timesSeconds) exact.push(await capture(time, captureSignal));
+      return exact;
+    }
     if (closed) throw new Error("Local FFmpeg frame decoder session is closed.");
     if (captureSignal?.aborted)
       throw new DOMException("Frame extraction cancelled.", "AbortError");
@@ -67,9 +76,7 @@ batch_impl = r'''
       Math.abs((item.time - ordered[index + 1].time) - cadence) <= tolerance,
     );
 
-    // The tracking scheduler is regular except for a possible short final
-    // remainder. Keep that remainder on the original exact-seek path rather
-    // than changing the requested tracking timestamp.
+    // Irregular timestamp groups retain the original exact-seek semantics.
     if (!regular) {
       const exact: Blob[] = [];
       for (const time of timesSeconds) exact.push(await capture(time, captureSignal));
@@ -83,11 +90,6 @@ batch_impl = r'''
       if (!instance.loaded || ffmpeg !== instance)
         throw new Error("Local FFmpeg frame decoder was reset and must be reopened.");
 
-      const start = ordered[0].time;
-      const fps = 1 / cadence;
-      const prefix = `tracking-batch-${crypto.randomUUID()}`;
-      const pattern = `${prefix}-%05d.png`;
-      const outputNames = ordered.map((_item, index) => `${prefix}-${String(index).padStart(5, "0")}.png`);
       const logs: string[] = [];
       const logListener = ({ message }: { message: string }) => {
         logs.push(message);
@@ -103,47 +105,133 @@ batch_impl = r'''
       };
       captureSignal?.addEventListener("abort", abort, { once: true });
       instance.on("log", logListener);
-      try {
-        onProgress?.(0.15, `Batch decoding ${ordered.length} tracking frames with local FFmpeg`);
-        const exitCode = await instance.exec(
-          [
-            "-hide_banner",
-            "-loglevel", "error",
-            "-ss", start.toFixed(6),
-            "-i", input.path,
-            "-map", "0:v:0",
-            "-vf", `setpts=PTS-STARTPTS,fps=fps=${fps.toFixed(8)}:start_time=0:round=near`,
-            "-frames:v", String(ordered.length),
-            "-an",
-            "-start_number", "0",
-            "-c:v", "png",
-            "-f", "image2",
-            pattern,
-          ],
-          -1,
-          captureSignal ? { signal: captureSignal } : undefined,
-        );
-        if (captureSignal?.aborted)
-          throw new DOMException("Frame extraction cancelled.", "AbortError");
-        if (exitCode !== 0)
-          throw new Error(logs.at(-1) || `FFmpeg tracking batch extraction exited with code ${exitCode}.`);
 
-        const ascending: Blob[] = [];
-        for (const outputName of outputNames) {
-          const data = await instance.readFile(
-            outputName,
-            undefined,
+      const exactCaptureInLane = async (timeSeconds: number): Promise<Blob> => {
+        const captureAt = async (seekTime: number): Promise<Blob> => {
+          const outputName = uniqueName("tracking-exact", "png");
+          logs.length = 0;
+          try {
+            const exitCode = await instance.exec(
+              [
+                "-hide_banner",
+                "-loglevel", "error",
+                "-ss", seekTime.toFixed(6),
+                "-i", input.path,
+                "-map", "0:v:0",
+                "-frames:v", "1",
+                "-an",
+                "-c:v", "png",
+                "-f", "image2",
+                outputName,
+              ],
+              -1,
+              captureSignal ? { signal: captureSignal } : undefined,
+            );
+            if (captureSignal?.aborted)
+              throw new DOMException("Frame extraction cancelled.", "AbortError");
+            if (exitCode !== 0)
+              throw new Error(logs.at(-1) || `FFmpeg exact tracking extraction exited with code ${exitCode}.`);
+            const data = await instance.readFile(
+              outputName,
+              undefined,
+              captureSignal ? { signal: captureSignal } : undefined,
+            );
+            const frame = bytesToBlob(data, "image/png");
+            if (frame.size < 128)
+              throw new Error("FFmpeg exact tracking extraction returned an empty image.");
+            return frame;
+          } finally {
+            if (instance.loaded) await deleteQuietly(instance, [outputName]);
+          }
+        };
+
+        const safeTime = Math.max(0, Number.isFinite(timeSeconds) ? timeSeconds : 0);
+        try {
+          return await captureAt(safeTime);
+        } catch (error) {
+          if (captureSignal?.aborted)
+            throw new DOMException("Frame extraction cancelled.", "AbortError");
+          const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+          if (safeTime <= 0 || !/ErrnoError|FS error|empty image|output file|no such file/i.test(message)) throw error;
+          // A timeline range may end exactly at media duration, where no frame
+          // exists by definition. Native capture already clamps to the last
+          // decodable frame; mirror that semantic with one frame-sized retry.
+          const previousFrameTime = Math.max(0, safeTime - 1 / 30);
+          onProgress?.(0.35, "Tracking endpoint is at media EOF; decoding the last available frame");
+          return captureAt(previousFrameTime);
+        }
+      };
+
+      const start = ordered[0].time;
+      const fps = 1 / cadence;
+      const prefix = `tracking-batch-${crypto.randomUUID()}`;
+      const pattern = `${prefix}-%05d.png`;
+      const outputNames = ordered.map((_item, index) => `${prefix}-${String(index).padStart(5, "0")}.png`);
+
+      try {
+        let batchFrames: Blob[] | null = null;
+        try {
+          onProgress?.(0.15, `Batch decoding ${ordered.length} tracking frames with local FFmpeg`);
+          const exitCode = await instance.exec(
+            [
+              "-hide_banner",
+              "-loglevel", "error",
+              "-ss", start.toFixed(6),
+              "-i", input.path,
+              "-map", "0:v:0",
+              "-vf", `setpts=PTS-STARTPTS,fps=fps=${fps.toFixed(8)}:start_time=0:round=near`,
+              "-frames:v", String(ordered.length),
+              "-an",
+              "-start_number", "0",
+              "-c:v", "png",
+              "-f", "image2",
+              pattern,
+            ],
+            -1,
             captureSignal ? { signal: captureSignal } : undefined,
           );
-          const frame = bytesToBlob(data, "image/png");
-          if (frame.size < 128)
-            throw new Error("FFmpeg tracking batch extraction returned an empty image.");
-          ascending.push(frame);
+          if (captureSignal?.aborted)
+            throw new DOMException("Frame extraction cancelled.", "AbortError");
+          if (exitCode !== 0)
+            throw new Error(logs.at(-1) || `FFmpeg tracking batch extraction exited with code ${exitCode}.`);
+
+          const ascending: Blob[] = [];
+          for (const outputName of outputNames) {
+            const data = await instance.readFile(
+              outputName,
+              undefined,
+              captureSignal ? { signal: captureSignal } : undefined,
+            );
+            const frame = bytesToBlob(data, "image/png");
+            if (frame.size < 128)
+              throw new Error("FFmpeg tracking batch extraction returned an empty image.");
+            ascending.push(frame);
+          }
+          if (ascending.length === ordered.length) batchFrames = ascending;
+        } catch (batchError) {
+          if (batchError instanceof DOMException && batchError.name === "AbortError") throw batchError;
+          // image2/fps can omit a requested boundary output while FFmpeg still
+          // exits successfully. Treat the optimized batch as speculative: clean
+          // its outputs and retry every timestamp exactly on this same mounted
+          // session. If the FS itself is corrupt, exactCaptureInLane fails and
+          // the decoder layer rebuilds the whole session once.
+          onProgress?.(0.3, "Batch output incomplete; recovering with exact timestamp extraction");
         }
-        onProgress?.(1, `Decoded ${ascending.length} tracking frames in one local FFmpeg pass`);
-        return timesSeconds[0] <= timesSeconds[timesSeconds.length - 1]
-          ? ascending
-          : ascending.reverse();
+
+        if (batchFrames) {
+          onProgress?.(1, `Decoded ${batchFrames.length} tracking frames in one local FFmpeg pass`);
+          const restored = new Array<Blob>(timesSeconds.length);
+          for (let index = 0; index < ordered.length; index += 1)
+            restored[ordered[index].index] = batchFrames[index];
+          return restored;
+        }
+
+        await deleteQuietly(instance, outputNames);
+        const exactFrames = new Array<Blob>(timesSeconds.length);
+        for (const item of ordered)
+          exactFrames[item.index] = await exactCaptureInLane(item.time);
+        onProgress?.(1, `Decoded ${exactFrames.length} tracking frames with exact local FFmpeg recovery`);
+        return exactFrames;
       } catch (error) {
         if (captureSignal?.aborted)
           throw new DOMException("Frame extraction cancelled.", "AbortError");
@@ -305,7 +393,8 @@ replace(
 
 # ---------------------------------------------------------------------------
 # 4. Regression coverage: no resolution sacrifice, no point-density sacrifice,
-#    bounded four-frame memory window, irregular timestamps preserve exact-seek.
+#    bounded four-frame memory window, irregular timestamps preserve exact-seek,
+#    and incomplete image2 batches recover transactionally on the same mount.
 # ---------------------------------------------------------------------------
 write("tests/tracking-batch-extraction.test.mjs", r'''import test from "node:test";
 import assert from "node:assert/strict";
@@ -319,10 +408,14 @@ test("Firefox FFmpeg tracking amortizes seeks in bounded full-resolution batches
   const controls = await read("components/videoflow/AIWatermarkControls.tsx");
 
   assert.match(ffmpeg, /captureBatch\(timesSeconds: number\[\]/);
+  assert.match(ffmpeg, /timesSeconds\.length <= 2/);
   assert.match(ffmpeg, /setpts=PTS-STARTPTS,fps=fps=/);
   assert.match(ffmpeg, /start_time=0:round=near/);
   assert.match(ffmpeg, /"-start_number", "0"/);
   assert.match(ffmpeg, /FFmpeg tracking batch extraction/);
+  assert.match(ffmpeg, /Batch output incomplete; recovering with exact timestamp extraction/);
+  assert.match(ffmpeg, /exactCaptureInLane/);
+  assert.match(ffmpeg, /safeTime - 1 \/ 30/);
   assert.match(ffmpeg, /if \(!regular\)[\s\S]*exact\.push\(await capture\(time, captureSignal\)\)/);
 
   const batchStart = ffmpeg.indexOf("const captureBatch = async");
