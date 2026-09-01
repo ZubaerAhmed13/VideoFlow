@@ -41,6 +41,7 @@ type InitRequest = {
   model: ArrayBuffer;
   providers: string[];
   hardwareConcurrency?: number;
+  maxWasmThreads?: number;
   imageInput: string;
   maskInput: string;
   outputName: string;
@@ -71,6 +72,13 @@ function sessionOptions(providers: string[]): SessionOptions {
   };
 }
 
+function resolveWasmThreadCount(data: InitRequest): number {
+  if (!self.crossOriginIsolated) return 1;
+  const hardwareLimit = Math.max(1, Math.min(4, data.hardwareConcurrency || 2));
+  const requestedLimit = Math.max(1, Math.min(4, data.maxWasmThreads || hardwareLimit));
+  return Math.min(hardwareLimit, requestedLimit);
+}
+
 async function init(data: InitRequest) {
   reportStage(data.id, "runtime-import");
   runtime = await import(/* @vite-ignore */ data.runtimeUrl) as OrtRuntime;
@@ -81,9 +89,7 @@ async function init(data: InitRequest) {
     // worker would add an unnecessary nested hop and complicate cancellation.
     runtime.env.wasm.proxy = false;
     runtime.env.wasm.initTimeout = 30_000;
-    wasmThreads = self.crossOriginIsolated
-      ? Math.max(1, Math.min(4, data.hardwareConcurrency || 2))
-      : 1;
+    wasmThreads = resolveWasmThreadCount(data);
     runtime.env.wasm.numThreads = wasmThreads;
   }
   imageInput = data.imageInput;
@@ -101,7 +107,7 @@ async function init(data: InitRequest) {
     provider = "wasm";
   }
   reportStage(data.id, "session-ready");
-  return provider;
+  return { provider, wasmThreads };
 }
 
 async function infer(data: InferRequest) {
@@ -150,21 +156,35 @@ async function infer(data: InferRequest) {
     result[i * 4 + 2] = Math.max(0, Math.min(255, b * scale));
     result[i * 4 + 3] = 255;
   }
-  return { result, inferenceMs, provider };
+  return { result, inferenceMs, provider, wasmThreads };
 }
 
 self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const message = event.data;
   try {
     if (message.type === "init") {
-      const activeProvider = await init(message);
-      self.postMessage({ id: message.id, kind: "result", ok: true, provider: activeProvider });
+      const active = await init(message);
+      self.postMessage({
+        id: message.id,
+        kind: "result",
+        ok: true,
+        provider: active.provider,
+        wasmThreads: active.wasmThreads,
+      });
       return;
     }
     if (message.type === "infer") {
       const response = await infer(message);
       self.postMessage(
-        { id: message.id, kind: "result", ok: true, provider: response.provider, inferenceMs: response.inferenceMs, rgba: response.result.buffer },
+        {
+          id: message.id,
+          kind: "result",
+          ok: true,
+          provider: response.provider,
+          wasmThreads: response.wasmThreads,
+          inferenceMs: response.inferenceMs,
+          rgba: response.result.buffer,
+        },
         [response.result.buffer],
       );
       return;
