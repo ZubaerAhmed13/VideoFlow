@@ -98,10 +98,7 @@ jobs:
           path = Path(".github/scripts/apply-batched-tracking.py")
           text = path.read_text()
           old = '    } finally { if (jobController.current === controller) jobController.current = null; setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession); }'
-          new = '''    } finally {
-      if (jobController.current === controller) jobController.current = null;
-      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);
-    }'''
+          new = '    } finally {\n      if (jobController.current === controller) jobController.current = null;\n      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);\n    }'
           if text.count(old) != 1:
               raise SystemExit(f"expected one stale tracking-finally helper target, found {text.count(old)}")
           path.write_text(text.replace(old, new))
