@@ -74,7 +74,10 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
   assert.match(media, /probeMediaBlob\(file, file\.name, controller\.signal\)/);
   assert.match(media, /controller\.abort\(\)/);
-  assert.match(await read("lib/videoflow/ffmpeg.ts"), /FFPROBE_TIMEOUT_MS = 12_000/);
+  const ffmpeg = await read("lib/videoflow/ffmpeg.ts");
+  assert.match(ffmpeg, /FFPROBE_TIMEOUT_MS = 12_000/);
+  assert.match(ffmpeg, /FFMPEG_LOAD_TIMEOUT_MS = 15_000/);
+  assert.match(ffmpeg, /FFmpeg initialization cancelled/);
   assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
 });
 

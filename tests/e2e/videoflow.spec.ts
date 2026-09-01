@@ -30,7 +30,12 @@ async function importMedia(page: Page, files: string | string[]) {
   // otherwise synchronize on the durable timeline state.
   const timeline = page.locator(".vf-clip");
   const importWarning = page.getByText("Some files were not imported", { exact: true });
-  await expect(timeline.or(importWarning)).toBeVisible({ timeout: 45_000 });
+  try {
+    await expect(timeline.first().or(importWarning)).toBeVisible({ timeout: 45_000 });
+  } catch (error) {
+    const stage = await page.evaluate(() => (window as Window & { __videoFlowImportStageForTest?: string }).__videoFlowImportStageForTest ?? "no import stage recorded");
+    throw new Error(`Media import stalled at: ${stage}`, { cause: error });
+  }
   if (await importWarning.isVisible()) {
     const toast = importWarning.locator("xpath=ancestor::*[@data-sonner-toast]").first();
     const detail = await toast.count() ? await toast.innerText() : await importWarning.locator("..").innerText();

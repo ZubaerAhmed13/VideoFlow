@@ -89,6 +89,7 @@ const MEMFS_INPUT_LIMIT_BYTES = 64 * 1024 * 1024;
 // successfully writing the requested JSON. A finite command timeout prevents
 // a probe from monopolising the single FFmpeg lane if the core stalls.
 const FFPROBE_TIMEOUT_MS = 12_000;
+const FFMPEG_LOAD_TIMEOUT_MS = 15_000;
 
 interface StagedInput {
   path: string;
@@ -113,7 +114,12 @@ function getLocalWasmUrl(): string {
   return deploymentAssetUrl("vendor/ffmpeg/ffmpeg-core.wasm");
 }
 
-async function getFfmpeg(onProgress?: ProgressCallback): Promise<FFmpeg> {
+async function getFfmpeg(
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal,
+): Promise<FFmpeg> {
+  if (signal?.aborted)
+    throw new DOMException("FFmpeg initialization cancelled.", "AbortError");
   if (ffmpeg?.loaded) return ffmpeg;
   if (!loadPromise) {
     onProgress?.(0.01, "Loading local FFmpeg engine");
@@ -121,15 +127,38 @@ async function getFfmpeg(onProgress?: ProgressCallback): Promise<FFmpeg> {
       const ffmpegModule = await import("@ffmpeg/ffmpeg");
       const instance = new ffmpegModule.FFmpeg();
       const base = new URL(deploymentAssetUrl("vendor/ffmpeg/"));
-      await instance.load({
-        coreURL: new URL("ffmpeg-core.js", base).href,
-        wasmURL: getLocalWasmUrl(),
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let abortLoad = () => {};
+      const boundedLoad = new Promise<never>((_, reject) => {
+        abortLoad = () => {
+          instance.terminate();
+          reject(new DOMException("FFmpeg initialization cancelled.", "AbortError"));
+        };
+        signal?.addEventListener("abort", abortLoad, { once: true });
+        timer = setTimeout(() => {
+          instance.terminate();
+          reject(new Error("Local FFmpeg initialization timed out."));
+        }, FFMPEG_LOAD_TIMEOUT_MS);
       });
+      try {
+        await Promise.race([
+          instance.load({
+            coreURL: new URL("ffmpeg-core.js", base).href,
+            wasmURL: getLocalWasmUrl(),
+          }),
+          boundedLoad,
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", abortLoad);
+      }
       ffmpeg = instance;
       return instance;
     })().catch((error) => {
       ffmpeg = null;
       loadPromise = null;
+      if (signal?.aborted)
+        throw new DOMException("FFmpeg initialization cancelled.", "AbortError");
       throw new Error(
         `The bundled FFmpeg engine could not initialize: ${String(error)}`,
       );
@@ -222,7 +251,7 @@ async function executeWithInput(
   return queueTask(async () => {
     if (signal.aborted)
       throw new DOMException("Processing cancelled.", "AbortError");
-    const instance = await getFfmpeg(onProgress);
+    const instance = await getFfmpeg(onProgress, signal);
     const outputName = uniqueName("output", outputExtension);
     let stagedInput: StagedInput | null = null;
     const logs: string[] = [];
@@ -558,7 +587,7 @@ async function renderTimelineInternal(
   };
   return queueTask(async () => {
     if (signal.aborted) throw new DOMException("Export cancelled.", "AbortError");
-    const instance = await getFfmpeg(onProgress);
+    const instance = await getFfmpeg(onProgress, signal);
     const createdFiles: string[] = [];
     const stagedInputs: StagedInput[] = [];
     const inputs: Array<{
@@ -699,7 +728,7 @@ export async function probeMediaBlob(
   return queueTask(async () => {
     if (signal.aborted)
       throw new DOMException("Media inspection cancelled.", "AbortError");
-    const instance = await getFfmpeg();
+    const instance = await getFfmpeg(undefined, signal);
     const outputName = uniqueName("probe", "json");
     let stagedInput: StagedInput | null = null;
     const abort = () => {
@@ -828,7 +857,7 @@ export async function encodeImageFramesToMp4(
   const lossless = frames.every((frame) => frame.type === "image/png");
   const extension = lossless ? "png" : "jpg";
   return queueTask(async () => {
-    const instance = await getFfmpeg(onProgress);
+    const instance = await getFfmpeg(onProgress, signal);
     const prefix = `ai-${crypto.randomUUID()}`;
     const output = `${prefix}-output.mp4`;
     const names: string[] = [];
@@ -887,7 +916,7 @@ export async function concatenateMp4Batches(
   if (!batches.length) throw new Error("AI batch concatenation received no segments.");
   if (batches.length === 1) return batches[0];
   return queueTask(async () => {
-    const instance = await getFfmpeg(onProgress);
+    const instance = await getFfmpeg(onProgress, signal);
     const prefix = `ai-batches-${crypto.randomUUID()}`;
     const listName = `${prefix}.txt`;
     const output = `${prefix}-output.mp4`;

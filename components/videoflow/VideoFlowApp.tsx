@@ -311,6 +311,10 @@ const NAV_ITEMS: Array<{
   { id: "settings", label: "Settings", icon: Settings2 },
 ];
 
+const markImportStage = (stage: string) => {
+  (window as Window & { __videoFlowImportStageForTest?: string }).__videoFlowImportStageForTest = stage;
+};
+
 const prettySize = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   if (bytes < 1024) return `${Math.round(bytes)} B`;
@@ -1215,11 +1219,13 @@ export function VideoFlowApp() {
     const referenced: RuntimeAsset[] = [];
     for (const file of Array.from(files))
       try {
+        markImportStage(`Inspecting ${file.name}`);
         const fileHandle = handles.get(file);
         let asset = await inspectFile(file, project.id, {
           fileHandle,
           storageMode: fileHandle ? "reference" : undefined,
         });
+        markImportStage(`Inspected ${file.name}`);
         if (
           assets.some(
             (entry) =>
@@ -1240,6 +1246,7 @@ export function VideoFlowApp() {
             subtitles: [...current.subtitles, ...cues],
           }));
         } else {
+          markImportStage(`Checking storage for ${file.name}`);
           let storage = await decideFileStorage(asset.size, {
             hasPersistentHandle: Boolean(asset.fileHandle),
             forceReference: Boolean(asset.fileHandle),
@@ -1264,14 +1271,18 @@ export function VideoFlowApp() {
             asset.fileHandle = undefined;
             await saveAsset(asset).catch(() => undefined);
           }
+          markImportStage(`Saved ${file.name}`);
           if (asset.storageMode === "session") sessionOnly.push(asset);
           if (asset.storageMode === "reference") referenced.push(asset);
           accepted.push(asset);
         }
       } catch (error) {
-        errors.push(error instanceof Error ? error.message : String(error));
+        const detail = error instanceof Error ? error.message : String(error);
+        markImportStage(`Failed ${file.name}: ${detail}`);
+        errors.push(detail);
       }
     if (accepted.length) {
+      markImportStage(`Accepted ${accepted.length} file${accepted.length === 1 ? "" : "s"}`);
       setAssets((items) => [...items, ...accepted]);
       commit("Media imported", (current) => {
         const firstImportedVideo = current.clips.some((clip) => clip.kind === "video")
