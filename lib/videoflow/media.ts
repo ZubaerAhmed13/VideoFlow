@@ -59,7 +59,6 @@ function kindForFile(file: File, signature: string): MediaKind | null {
 
 const OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000;
 const STORAGE_ESTIMATE_TIMEOUT_MS = 1_000;
-const STORAGE_PERSISTENCE_TIMEOUT_MS = 1_000;
 
 async function optionalTechnicalProbe(file: File): Promise<MediaProbe | undefined> {
   const { probeMediaBlob } = await import("./ffmpeg");
@@ -248,62 +247,20 @@ async function boundedStorageEstimate(): Promise<StorageEstimate | undefined> {
   }
 }
 
-async function boundedStoragePersistenceGrant(): Promise<boolean | undefined> {
-  let timer = 0;
-  try {
-    const persistPromise = navigator.storage?.persist?.();
-    if (!persistPromise) return undefined;
-    return await Promise.race([
-      persistPromise,
-      new Promise<boolean>((resolve) => {
-        timer = window.setTimeout(
-          () => resolve(false),
-          STORAGE_PERSISTENCE_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } catch {
-    return false;
-  } finally {
-    if (timer) window.clearTimeout(timer);
-  }
-}
-
 export async function decideFileStorage(
   fileSize: number,
   options: { hasPersistentHandle?: boolean; forceReference?: boolean } = {},
 ) {
-  // Decisions that are already reference/session based do not need optional
-  // browser storage calls at all. Large originals stay out of IndexedDB.
+  // Decisions that are already reference/session based do not need an
+  // optional quota lookup at all. This is especially important for very
+  // large media where browser storage should never receive the original.
   const estimateFreeDecision = assessImportStorage(fileSize, {}, options);
   if (estimateFreeDecision.mode !== "persisted") return estimateFreeDecision;
 
-  // Quota and persistence APIs are advisory and can remain unresolved in
-  // browser automation/private contexts. Never let either API freeze import.
+  // StorageManager.estimate() is advisory. Some browser/CI combinations can
+  // leave its promise unresolved, so never allow it to block media import.
   const estimate = await boundedStorageEstimate();
-  if (!estimate) {
-    return {
-      mode: "session" as const,
-      risk: estimateFreeDecision.risk,
-      reason: "Browser storage quota could not be confirmed promptly, so the original remains attached for this session.",
-    };
-  }
-
-  const storageDecision = assessImportStorage(fileSize, estimate, options);
-  if (storageDecision.mode !== "persisted") return storageDecision;
-
-  // Only write an original Blob to IndexedDB after the browser confirms
-  // persistent storage promptly. A denial or timeout safely degrades to a
-  // session attachment; the in-memory source remains fully usable.
-  const persistenceGranted = await boundedStoragePersistenceGrant();
-  if (persistenceGranted === false) {
-    return {
-      mode: "session" as const,
-      risk: storageDecision.risk,
-      reason: "Persistent browser storage was not granted promptly, so the original remains attached for this session.",
-    };
-  }
-  return storageDecision;
+  return assessImportStorage(fileSize, estimate, options);
 }
 
 export function supportsReferenceImport(): boolean {
