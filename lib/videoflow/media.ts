@@ -58,19 +58,23 @@ const OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000;
 
 async function optionalTechnicalProbe(file: File): Promise<MediaProbe | undefined> {
   const { probeMediaBlob } = await import("./ffmpeg");
+  const controller = new AbortController();
   let timer = 0;
   try {
     return await Promise.race([
-      probeMediaBlob(file, file.name),
+      probeMediaBlob(file, file.name, controller.signal),
       new Promise<never>((_, reject) => {
-        timer = window.setTimeout(
-          () => reject(new Error("Optional technical metadata probe timed out.")),
-          OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS,
-        );
+        timer = window.setTimeout(() => {
+          // Promise.race alone does not stop ffprobe. Cancelling is essential:
+          // otherwise its queued task can block every later export.
+          controller.abort();
+          reject(new Error("Optional technical metadata probe timed out."));
+        }, OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS);
       }),
     ]);
   } finally {
     if (timer) window.clearTimeout(timer);
+    controller.abort();
   }
 }
 
@@ -78,7 +82,7 @@ function loadElementMetadata(file: File, kind: MediaKind, url: string): Promise<
   if (kind === "subtitle") return Promise.resolve({ duration: 0, width: 0, height: 0 });
   return new Promise((resolve, reject) => {
     const element = kind === "image" ? new Image() : document.createElement(kind === "video" ? "video" : "audio");
-    const timeout = window.setTimeout(() => reject(new Error(`Timed out while reading ${file.name}.`)), 15000);
+    const timeout = window.setTimeout(() => reject(new Error(`Timed out while reading ${file.name}.`)), 8000);
     const done = () => {
       window.clearTimeout(timeout);
       if (element instanceof HTMLImageElement) resolve({ duration: 0, width: element.naturalWidth, height: element.naturalHeight });

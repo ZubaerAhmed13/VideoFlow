@@ -68,7 +68,11 @@ test("Firefox browser matrix uses baseline VP8 Vorbis fixtures", async () => {
 
 test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(await read("app/globals.css"), /\.vf-export-dialog[\s\S]*max-height: calc\(100dvh - 32px\)[\s\S]*overflow-y: auto/);
-  assert.match(await read("lib/videoflow/media.ts"), /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
+  const media = await read("lib/videoflow/media.ts");
+  assert.match(media, /OPTIONAL_TECHNICAL_PROBE_TIMEOUT_MS = 6_000/);
+  assert.match(media, /probeMediaBlob\(file, file\.name, controller\.signal\)/);
+  assert.match(media, /controller\.abort\(\)/);
+  assert.match(await read("lib/videoflow/ffmpeg.ts"), /FFPROBE_TIMEOUT_MS = 12_000/);
   assert.match(await read("components/videoflow/AIWatermarkControls.tsx"), /aria-label="Run AI preview"/);
 });
 

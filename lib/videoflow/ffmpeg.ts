@@ -85,6 +85,10 @@ const WORKER_FS = "WORKERFS" as FFFSType;
 // engines. Larger media must stay blob-backed so reference workflows never
 // copy a multi-gigabyte source into the WebAssembly heap.
 const MEMFS_INPUT_LIMIT_BYTES = 64 * 1024 * 1024;
+// ffmpeg.wasm core 0.12.10 can report a non-zero ffprobe exit after
+// successfully writing the requested JSON. A finite command timeout prevents
+// a probe from monopolising the single FFmpeg lane if the core stalls.
+const FFPROBE_TIMEOUT_MS = 12_000;
 
 interface StagedInput {
   path: string;
@@ -483,6 +487,27 @@ async function makeOverlayBlob(
   return canvasBlob(canvas);
 }
 
+async function readProbeJson(
+  instance: FFmpeg,
+  outputName: string,
+  signal: AbortSignal,
+  exitCode: number,
+  label: string,
+): Promise<MediaProbe> {
+  try {
+    const raw = await instance.readFile(outputName, "utf8", { signal });
+    const parsed = JSON.parse(
+      typeof raw === "string" ? raw : new TextDecoder().decode(raw),
+    ) as MediaProbe;
+    if (!Array.isArray(parsed.streams)) parsed.streams = [];
+    return parsed;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const exit = exitCode === 0 ? "" : ` (probe exit ${exitCode})`;
+    throw new Error(`${label}${exit}: ${detail}`);
+  }
+}
+
 async function probeWrittenFile(
   instance: FFmpeg,
   filename: string,
@@ -492,14 +517,18 @@ async function probeWrittenFile(
   try {
     const exitCode = await instance.ffprobe(
       ["-v", "error", "-i", filename, "-show_streams", "-show_format", "-of", "json", "-o", outputName],
-      -1,
+      FFPROBE_TIMEOUT_MS,
       { signal },
     );
-    if (exitCode !== 0) throw new Error(`FFmpeg could not inspect ${filename}.`);
-    const raw = await instance.readFile(outputName, "utf8", { signal });
-    return JSON.parse(
-      typeof raw === "string" ? raw : new TextDecoder().decode(raw),
-    ) as MediaProbe;
+    // Core 0.12.10 may return -1 even when the JSON output is complete.
+    // Validate the output itself instead of discarding usable metadata.
+    return readProbeJson(
+      instance,
+      outputName,
+      signal,
+      exitCode,
+      `FFmpeg could not inspect ${filename}`,
+    );
   } finally {
     if (instance.loaded) await instance.deleteFile(outputName).catch(() => false);
   }
@@ -697,15 +726,17 @@ export async function probeMediaBlob(
           "-o",
           outputName,
         ],
-        -1,
+        FFPROBE_TIMEOUT_MS,
         { signal },
       );
-      if (exitCode !== 0)
-        throw new Error("FFmpeg could not inspect this media container.");
-      const raw = await instance.readFile(outputName, "utf8", { signal });
-      return JSON.parse(
-        typeof raw === "string" ? raw : new TextDecoder().decode(raw),
-      ) as MediaProbe;
+      // Treat a valid JSON file as success even if core 0.12.10 reports -1.
+      return readProbeJson(
+        instance,
+        outputName,
+        signal,
+        exitCode,
+        "FFmpeg could not inspect this media container",
+      );
     } finally {
       signal.removeEventListener("abort", abort);
       if (instance.loaded) {
