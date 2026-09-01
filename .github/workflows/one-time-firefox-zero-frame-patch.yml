@@ -1,0 +1,118 @@
+name: One-time Firefox zero-frame decode patch
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-time-firefox-zero-frame-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Patch Firefox zero-frame decode
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          ai_path = Path("components/videoflow/AIWatermarkControls.tsx")
+          source = ai_path.read_text()
+          pattern = re.compile(
+              r'async function waitForDecodedVideoFrame\(video: HTMLVideoElement, target: number, signal\?: AbortSignal\): Promise<void> \{.*?\n\}\n\n(?=async function frameAt)',
+              re.S,
+          )
+          matches = list(pattern.finditer(source))
+          if len(matches) != 1:
+              raise SystemExit(f"Expected exactly one waitForDecodedVideoFrame helper, found {len(matches)}")
+
+          replacement = '''async function waitForDecodedVideoFrame(video: HTMLVideoElement, target: number, signal?: AbortSignal): Promise<void> {
+            abortIfRequested(signal);
+            const durationLimit = Number.isFinite(video.duration) && video.duration > 0
+              ? Math.max(0, video.duration - 0.001)
+              : Math.max(0, target);
+            // Firefox can treat currentTime = 0 as a no-op before the first
+            // Ogg/Theora frame is decoded. Nudge the decoder by one millisecond
+            // only when the requested time already equals currentTime and no
+            // decoded frame data exists yet. The captured frame remains the
+            // source's first presentation frame and timeline timing is unchanged.
+            const decodeTarget =
+              video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA &&
+              Math.abs(video.currentTime - target) <= 0.0005 &&
+              durationLimit > 0
+                ? Math.min(durationLimit, Math.max(0.001, target + 0.001))
+                : target;
+            const ready = () =>
+              video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+              video.videoWidth > 0 &&
+              video.videoHeight > 0 &&
+              Math.abs(video.currentTime - decodeTarget) <= 0.05;
+            if (!ready()) {
+              await new Promise<void>((resolve, reject) => {
+                let timeout = 0;
+                const cleanup = () => {
+                  if (timeout) window.clearTimeout(timeout);
+                  video.removeEventListener("loadeddata", onReady);
+                  video.removeEventListener("canplay", onReady);
+                  video.removeEventListener("seeked", onReady);
+                  video.removeEventListener("timeupdate", onReady);
+                  video.removeEventListener("error", onError);
+                  signal?.removeEventListener("abort", onAbort);
+                };
+                const finish = () => { cleanup(); resolve(); };
+                const onReady = () => { if (ready()) finish(); };
+                const onError = () => { cleanup(); reject(new Error("Could not decode the selected AI frame.")); };
+                const onAbort = () => { cleanup(); reject(new DOMException("AI job cancelled.", "AbortError")); };
+                timeout = window.setTimeout(() => {
+                  cleanup();
+                  reject(new Error("Timed out while decoding the selected AI frame."));
+                }, FRAME_DECODE_TIMEOUT_MS);
+                video.addEventListener("loadeddata", onReady);
+                video.addEventListener("canplay", onReady);
+                video.addEventListener("seeked", onReady);
+                video.addEventListener("timeupdate", onReady);
+                video.addEventListener("error", onError, { once: true });
+                signal?.addEventListener("abort", onAbort, { once: true });
+                try {
+                  if (Math.abs(video.currentTime - decodeTarget) > 0.0005 || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA)
+                    video.currentTime = decodeTarget;
+                } catch (error) {
+                  cleanup();
+                  reject(error);
+                  return;
+                }
+                onReady();
+              });
+            }
+            await waitForFramePresentation(video, signal);
+          }
+
+          '''
+          replacement = "\n".join(line[10:] if line.startswith("          ") else line for line in replacement.splitlines())
+          ai_path.write_text(pattern.sub(replacement, source, count=1))
+
+          test_path = Path("tests/final-browser-regressions.test.mjs")
+          tests = test_path.read_text()
+          anchor = 'assert.match(aiControls, /FRAME_CAPTURE_RETRIES = 4/);\n'
+          addition = (
+              'assert.match(aiControls, /const decodeTarget =/);\n'
+              'assert.match(aiControls, /Math\\.max\\(0\\.001, target \\+ 0\\.001\\)/);\n'
+              'assert.match(aiControls, /video\\.currentTime = decodeTarget/);\n'
+          )
+          if tests.count(anchor) != 1:
+              raise SystemExit(f"Expected one frame retry assertion, found {tests.count(anchor)}")
+          test_path.write_text(tests.replace(anchor, anchor + addition, 1))
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/videoflow/AIWatermarkControls.tsx tests/final-browser-regressions.test.mjs
+          git diff --cached --check
+          git diff --cached --quiet || git commit -m "Fix Firefox zero-frame AI decoding"
+          git push origin HEAD:main
