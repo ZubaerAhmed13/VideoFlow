@@ -1,6 +1,7 @@
 import { deploymentAssetUrl } from "../base-url";
 const RUNTIME_CACHE = "videoflow-ai-runtime-v1";
 const REQUIRED_RUNTIME_FILES = [
+  "ort.wasm.bundle.min.mjs",
   "ort.webgpu.bundle.min.mjs",
   "ort-wasm-simd-threaded.asyncify.mjs",
   "ort-wasm-simd-threaded.asyncify.wasm",

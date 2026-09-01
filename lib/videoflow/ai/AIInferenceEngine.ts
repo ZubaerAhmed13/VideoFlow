@@ -12,12 +12,25 @@ type OrtRuntime = {
   InferenceSession: { create(model: ArrayBuffer, options: { executionProviders: string[] }): Promise<{ inputNames?: string[]; outputNames?: string[]; run(feeds: Record<string, OrtTensor>): Promise<Record<string, { data: Float32Array | Uint8Array }>>; release?(): Promise<void> | void }> };
 };
 
-let runtimePromise: Promise<OrtRuntime> | null = null;
-let sessionPromise: Promise<{ session: Awaited<ReturnType<OrtRuntime["InferenceSession"]["create"]>>; provider: AIProvider }> | null = null;
+type RuntimeFlavor = "webgpu" | "wasm";
+type ResolvedSession = {
+  runtime: OrtRuntime;
+  session: Awaited<ReturnType<OrtRuntime["InferenceSession"]["create"]>>;
+  provider: AIProvider;
+  flavor: RuntimeFlavor;
+};
 
-async function loadRuntime(): Promise<OrtRuntime> {
-  if (!runtimePromise) {
-    runtimePromise = (import(/* @vite-ignore */ deploymentAssetUrl("vendor/onnx/ort.webgpu.bundle.min.mjs")) as Promise<OrtRuntime>)
+const runtimePromises: Partial<Record<RuntimeFlavor, Promise<OrtRuntime>>> = {};
+let sessionPromise: Promise<ResolvedSession> | null = null;
+let sessionFlavor: RuntimeFlavor | null = null;
+
+function runtimeFile(flavor: RuntimeFlavor): string {
+  return flavor === "webgpu" ? "ort.webgpu.bundle.min.mjs" : "ort.wasm.bundle.min.mjs";
+}
+
+async function loadRuntime(flavor: RuntimeFlavor): Promise<OrtRuntime> {
+  if (!runtimePromises[flavor]) {
+    runtimePromises[flavor] = (import(/* @vite-ignore */ deploymentAssetUrl(`vendor/onnx/${runtimeFile(flavor)}`)) as Promise<OrtRuntime>)
       .then((runtime) => {
         // ONNX Runtime otherwise derives its companion .mjs/.wasm URLs from
         // the generated application chunk. On a nested SPA host that request
@@ -26,31 +39,61 @@ async function loadRuntime(): Promise<OrtRuntime> {
         return runtime;
       });
   }
-  return runtimePromise;
+  return runtimePromises[flavor]!;
+}
+
+async function executionPlan(settings: AISettings): Promise<{ flavor: RuntimeFlavor; providers: string[] }> {
+  const capability = await detectAICapability();
+  const requested = settings.provider === "auto" ? capability.recommendedProvider : settings.provider;
+  const useWebgpu = requested === "webgpu" && capability.webgpu === "available";
+  return {
+    flavor: useWebgpu ? "webgpu" : "wasm",
+    providers: useWebgpu ? ["webgpu", "wasm"] : ["wasm"],
+  };
 }
 
 export async function initializeAI(settings: AISettings): Promise<{ provider: AIProvider }> {
-  if (!sessionPromise) sessionPromise = (async () => {
-    const [runtime, model, capability] = await Promise.all([loadRuntime(), getAIModelBytes(DEFAULT_AI_MODEL), detectAICapability()]);
-    if (!model) throw new Error("AI Reconstruction model not installed.");
-    if (runtime.env?.wasm) runtime.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2)) : 1;
-    const requested = settings.provider === "auto" ? capability.recommendedProvider : settings.provider;
-    const providers = requested === "webgpu" && capability.webgpu === "available" ? ["webgpu", "wasm"] : ["wasm"];
-    try {
-      return { session: await runtime.InferenceSession.create(model, { executionProviders: providers }), provider: providers[0] as AIProvider };
-    } catch (error) {
-      if (providers[0] === "webgpu") return { session: await runtime.InferenceSession.create(model, { executionProviders: ["wasm"] }), provider: "wasm" };
-      throw error;
+  const plan = await executionPlan(settings);
+  if (!sessionPromise || sessionFlavor !== plan.flavor) {
+    if (sessionPromise) {
+      const previous = await sessionPromise.catch(() => null);
+      await previous?.session.release?.();
     }
-  })();
+    sessionFlavor = plan.flavor;
+    sessionPromise = (async () => {
+      const [runtime, model] = await Promise.all([loadRuntime(plan.flavor), getAIModelBytes(DEFAULT_AI_MODEL)]);
+      if (!model) throw new Error("AI Reconstruction model not installed.");
+      if (runtime.env?.wasm) runtime.env.wasm.numThreads = globalThis.crossOriginIsolated ? Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2)) : 1;
+      try {
+        return {
+          runtime,
+          session: await runtime.InferenceSession.create(model, { executionProviders: plan.providers }),
+          provider: plan.providers[0] as AIProvider,
+          flavor: plan.flavor,
+        };
+      } catch (error) {
+        if (plan.providers[0] !== "webgpu") throw error;
+        return {
+          runtime,
+          session: await runtime.InferenceSession.create(model, { executionProviders: ["wasm"] }),
+          provider: "wasm",
+          flavor: plan.flavor,
+        };
+      }
+    })().catch((error) => {
+      sessionPromise = null;
+      sessionFlavor = null;
+      throw error;
+    });
+  }
   const result = await sessionPromise;
   return { provider: result.provider };
 }
 
 async function runImageInpaintingMainThread(image: ImageData, mask: Float32Array, settings: AISettings): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
-  const runtime = await loadRuntime();
   const { provider } = await initializeAI(settings);
   const resolved = await sessionPromise!;
+  const runtime = resolved.runtime;
   const size = DEFAULT_AI_MODEL.inputWidth;
   if (image.width !== size || image.height !== size) throw new Error(`AI input must be ${size}×${size}.`);
   const pixels = size * size;
@@ -73,7 +116,7 @@ async function runImageInpaintingMainThread(image: ImageData, mask: Float32Array
       rgb[pixels + i] = image.data[i * 4 + 1] / 255;
       rgb[pixels * 2 + i] = image.data[i * 4 + 2] / 255;
     }
-    feeds[inputNames[0]] = new runtime.Tensor("float32", rgb, [1, 3, size, size]);
+    feeds[inputNames[0] ?? DEFAULT_AI_MODEL.imageInput] = new runtime.Tensor("float32", rgb, [1, 3, size, size]);
     feeds[inputNames[1] ?? DEFAULT_AI_MODEL.maskInput] = new runtime.Tensor("float32", mask, [1, 1, size, size]);
   }
   const start = performance.now();
@@ -99,9 +142,9 @@ export async function runImageInpainting(image: ImageData, mask: Float32Array, s
       return await runWorkerInpainting(image, mask, settings, signal);
     } catch (error) {
       if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) throw error;
-      // A browser may reject module workers or worker WebGPU. Preserve a genuine
-      // local neural fallback on the main thread instead of silently changing
-      // the reconstruction method.
+      // A browser may reject module workers or a worker runtime may fail its
+      // watchdog. Preserve a genuine local neural fallback on the main thread
+      // instead of silently changing the reconstruction method.
     }
   }
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
@@ -115,4 +158,5 @@ export async function resetAISession(): Promise<void> {
     await current?.session.release?.();
   }
   sessionPromise = null;
+  sessionFlavor = null;
 }

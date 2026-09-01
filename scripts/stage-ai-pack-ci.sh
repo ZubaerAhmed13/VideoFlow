@@ -19,6 +19,7 @@ fi
 
 runtime_is_complete=1
 for name in \
+  ort.wasm.bundle.min.mjs \
   ort.webgpu.bundle.min.mjs \
   ort-wasm-simd-threaded.asyncify.mjs \
   ort-wasm-simd-threaded.asyncify.wasm \
@@ -42,6 +43,7 @@ else
     tar -xzf "$(cat package-name.txt)"
   )
   for name in \
+    ort.wasm.bundle.min.mjs \
     ort.webgpu.bundle.min.mjs \
     ort-wasm-simd-threaded.asyncify.mjs \
     ort-wasm-simd-threaded.asyncify.wasm \
