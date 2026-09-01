@@ -25,10 +25,18 @@ jobs:
           cache: npm
 
       - name: Apply guarded adaptive-model migration
-        run: python .github/scripts/apply-adaptive-lama.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-adaptive-lama.py
+          sed -i 's/WORKER_INFERENCE_TIMEOUT_MS = 130_000/WORKER_INFERENCE_TIMEOUT_MS = 125_000/g' lib/videoflow/ai/AIWorkerClient.ts
+          sed -i 's/WORKER_INFERENCE_TIMEOUT_MS = 130_000/WORKER_INFERENCE_TIMEOUT_MS = 125_000/g' tests/onnx-runtime-selection.test.mjs tests/final-browser-regressions.test.mjs
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Stage checksum-pinned dynamic model and local runtime
+        run: bash scripts/stage-ai-pack-ci.sh
 
       - name: Validate adaptive AI source contracts
         shell: bash
@@ -52,9 +60,6 @@ jobs:
           tests/onnx-runtime-selection.test.mjs
           tests/final-browser-regressions.test.mjs
           tests/github-upload-assets.test.mjs
-
-      - name: Stage checksum-pinned dynamic model and local runtime
-        run: bash scripts/stage-ai-pack-ci.sh
 
       - name: Certify genuine 512 WASM inference with dynamic model
         run: npm run cert:ai:wasm
