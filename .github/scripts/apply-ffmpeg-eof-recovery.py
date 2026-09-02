@@ -315,7 +315,7 @@ test("single and batched FFmpeg frame capture share bounded EOF recovery without
   assert.match(source, /Local FFmpeg frame decoder was reset and must be reopened/);
 
   const sessionStart = source.indexOf("export async function createFfmpegFrameExtractionSession");
-  const sessionEnd = source.indexOf("export async function probeBlobWithFfmpeg", sessionStart);
+  const sessionEnd = source.indexOf("export async function transcodeMedia", sessionStart);
   const session = source.slice(sessionStart, sessionEnd > sessionStart ? sessionEnd : undefined);
   assert.doesNotMatch(session, /\bscale\s*=/, "Frame fallback must preserve the selected source/proxy resolution.");
   assert.doesNotMatch(session, /mountInput\([^\n]*\)[\s\S]*mountInput\(/,
