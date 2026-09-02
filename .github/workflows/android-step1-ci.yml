@@ -12,26 +12,29 @@ permissions:
 jobs:
   step1-certification:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
+    timeout-minutes: 70
     steps:
       - name: Checkout certification branch
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
+      - name: Set up current Android command-line tools
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 15859902
+          packages: platform-tools
 
-      - name: Install Android platform and media fixture tooling
+      - name: Install Android 17 API 37 platform and fixture tools
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          set -euo pipefail
+          sdkmanager --channel=3 "platform-tools" "platforms;android-37"
+          sdkmanager --list_installed | grep -E 'platforms;android-37|platform-tools'
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg zip
 
@@ -44,10 +47,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf android-step1-work
           mkdir -p android-step1-work
           cat android-step1-ci/source.part*.b64 | tr -d '\n\r' | base64 -d > /tmp/VideoFlow_CI_Source_CodeOnly.zip
           echo "e6f7cf59bfb956b6990b384d85ee0bd2c09a4dcb3e9fb869ec01cfd56a6909b3  /tmp/VideoFlow_CI_Source_CodeOnly.zip" | sha256sum -c -
           unzip -q /tmp/VideoFlow_CI_Source_CodeOnly.zip -d android-step1-work
+          if [ -d android-step1-ci/overrides ]; then cp -R android-step1-ci/overrides/. android-step1-work/; fi
           cd android-step1-work
           gradle wrapper --gradle-version 9.6.0
           chmod +x gradlew
@@ -94,7 +99,7 @@ jobs:
         working-directory: android-step1-work
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Assemble release APK
+      - name: Assemble test-signed release APK
         working-directory: android-step1-work
         run: ./gradlew assembleRelease --stacktrace
 
@@ -112,26 +117,20 @@ jobs:
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           mkdir -p step1-deliverables/reports
-          if [ -f android-step1-work/app/build/outputs/apk/debug/app-debug.apk ]; then
-            cp android-step1-work/app/build/outputs/apk/debug/app-debug.apk step1-deliverables/VideoFlow_Android_Step1_Debug.apk
+          if [ -d android-step1-work ]; then
+            [ ! -f android-step1-work/app/build/outputs/apk/debug/app-debug.apk ] || cp android-step1-work/app/build/outputs/apk/debug/app-debug.apk step1-deliverables/VideoFlow_Android_Step1_Debug.apk
+            [ ! -f android-step1-work/app/build/outputs/apk/release/app-release.apk ] || cp android-step1-work/app/build/outputs/apk/release/app-release.apk step1-deliverables/VideoFlow_Android_Step1_Release.apk
+            cp -R android-step1-work/app/build/reports step1-deliverables/reports/app-build-reports 2>/dev/null || true
+            (cd android-step1-work && zip -qr ../step1-deliverables/VideoFlow_Android_Step1_CI_Source.zip . -x '.gradle/*' '*/build/*' '.idea/*' 'local.properties' '*.apk' '*.jks' '*.keystore') || true
+          else
+            echo 'Android source reconstruction did not complete.' > step1-deliverables/CI_FAILURE_SUMMARY.txt
           fi
-          if [ -f android-step1-work/app/build/outputs/apk/release/app-release.apk ]; then
-            cp android-step1-work/app/build/outputs/apk/release/app-release.apk step1-deliverables/VideoFlow_Android_Step1_Release.apk
-          fi
-          cp -R android-step1-work/app/build/reports step1-deliverables/reports/app-build-reports 2>/dev/null || true
-          cp -R android-step1-work/build/reports step1-deliverables/reports/root-build-reports 2>/dev/null || true
-          (
-            cd android-step1-work
-            zip -qr ../step1-deliverables/VideoFlow_Android_Step1_CI_Source.zip . \
-              -x '.gradle/*' '*/build/*' '.idea/*' 'local.properties' '*.apk' '*.jks' '*.keystore'
-          )
           cd step1-deliverables
-          sha256sum VideoFlow_Android_Step1_CI_Source.zip > SHA256SUMS.txt
-          for apk in *.apk; do
-            [ -f "$apk" ] && sha256sum "$apk" >> SHA256SUMS.txt || true
-          done
+          : > SHA256SUMS.txt
+          [ ! -f VideoFlow_Android_Step1_CI_Source.zip ] || sha256sum VideoFlow_Android_Step1_CI_Source.zip >> SHA256SUMS.txt
+          for apk in *.apk; do [ -f "$apk" ] && sha256sum "$apk" >> SHA256SUMS.txt || true; done
           cat SHA256SUMS.txt
 
       - name: Upload Step 1 certification artifacts
