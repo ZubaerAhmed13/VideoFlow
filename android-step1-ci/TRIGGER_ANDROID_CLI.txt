@@ -1,0 +1,1 @@
+Trigger API 37 certification using the current Android CLI.
