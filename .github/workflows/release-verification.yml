@@ -98,3 +98,4 @@ jobs:
           name: videoflow-static-site
           path: .pages-dist
           if-no-files-found: error
+          include-hidden-files: true
