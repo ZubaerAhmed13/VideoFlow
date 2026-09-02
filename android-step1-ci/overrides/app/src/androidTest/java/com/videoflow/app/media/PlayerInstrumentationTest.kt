@@ -25,36 +25,38 @@ class PlayerInstrumentationTest {
         val context: Context = ApplicationProvider.getApplicationContext()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val ready = CountDownLatch(1)
-        lateinit var player: ExoPlayer
+        var player: ExoPlayer? = null
 
         instrumentation.runOnMainSync {
-            player = ExoPlayer.Builder(context)
+            val createdPlayer = ExoPlayer.Builder(context)
                 .setLooper(Looper.getMainLooper())
                 .build()
-            player.addListener(object : Player.Listener {
+            createdPlayer.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) ready.countDown()
                 }
             })
-            player.setMediaItem(MediaItem.fromUri(TestMediaProvider.uri("sample_av.mp4")))
-            player.prepare()
+            createdPlayer.setMediaItem(MediaItem.fromUri(TestMediaProvider.uri("sample_av.mp4")))
+            createdPlayer.prepare()
+            player = createdPlayer
         }
 
+        val activePlayer = requireNotNull(player) { "ExoPlayer was not created on the main thread" }
         try {
             assertTrue("Media3 did not reach READY", ready.await(15, TimeUnit.SECONDS))
 
             val duration = AtomicLong()
-            instrumentation.runOnMainSync { duration.set(player.duration) }
+            instrumentation.runOnMainSync { duration.set(activePlayer.duration) }
             assertTrue(duration.get() > 0L)
 
             val fractions = listOf(0.0, 0.25, 0.50, 0.75, 0.95)
             for (fraction in fractions) {
                 val target = (duration.get() * fraction).toLong()
-                instrumentation.runOnMainSync { player.seekTo(target) }
+                instrumentation.runOnMainSync { activePlayer.seekTo(target) }
                 SystemClock.sleep(350)
 
                 val current = AtomicLong()
-                instrumentation.runOnMainSync { current.set(player.currentPosition) }
+                instrumentation.runOnMainSync { current.set(activePlayer.currentPosition) }
                 val tolerance = 1_000L
                 assertTrue(
                     "Seek was too far from target $target (actual ${current.get()})",
@@ -62,14 +64,12 @@ class PlayerInstrumentationTest {
                 )
             }
 
-            instrumentation.runOnMainSync { player.pause() }
+            instrumentation.runOnMainSync { activePlayer.pause() }
             var playWhenReady = true
-            instrumentation.runOnMainSync { playWhenReady = player.playWhenReady }
+            instrumentation.runOnMainSync { playWhenReady = activePlayer.playWhenReady }
             assertFalse(playWhenReady)
         } finally {
-            if (::player.isInitialized) {
-                instrumentation.runOnMainSync { player.release() }
-            }
+            instrumentation.runOnMainSync { activePlayer.release() }
         }
     }
 }
