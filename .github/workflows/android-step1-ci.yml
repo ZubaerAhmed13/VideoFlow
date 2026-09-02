@@ -29,18 +29,24 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
-      - name: Install Android 17 API 37 platform with Android CLI
+      - name: Install verified Android 17 API 37.0 platform
         shell: bash
         run: |
           set -euo pipefail
-          ANDROID_CLI="$ANDROID_HOME/cmdline-tools/15859902/bin/android"
-          "$ANDROID_CLI" --version
-          "$ANDROID_CLI" sdk list 'platforms/.*(37|Cinnamon).*' --all --all-versions --canary || true
-          "$ANDROID_CLI" sdk install platforms/android-CinnamonBun build-tools/37.0.0
-          test -f "$ANDROID_HOME/platforms/android-CinnamonBun/android.jar"
-          ls -la "$ANDROID_HOME/platforms/android-CinnamonBun"
+          PLATFORM_URL='https://dl.google.com/android/repository/platform-37.0_r02.zip'
+          PLATFORM_SHA1='ed8ebf7f8822a4de5686d427f237d2fa30ff7410'
+          curl -fL --retry 4 --retry-delay 2 "$PLATFORM_URL" -o /tmp/platform-37.0_r02.zip
+          echo "$PLATFORM_SHA1  /tmp/platform-37.0_r02.zip" | sha1sum -c -
+          rm -rf "$ANDROID_HOME/platforms/android-37.0"
+          mkdir -p "$ANDROID_HOME/platforms"
+          unzip -q /tmp/platform-37.0_r02.zip -d "$ANDROID_HOME/platforms"
+          test -f "$ANDROID_HOME/platforms/android-37.0/android.jar"
+          sdkmanager 'build-tools;36.0.0'
+          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt2"
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg zip
+          echo 'Installed Android platform:'
+          grep -E 'Pkg.Path|AndroidVersion.ApiLevel|AndroidVersion.CodeName' "$ANDROID_HOME/platforms/android-37.0/source.properties" || true
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
