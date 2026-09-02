@@ -6,6 +6,7 @@ on:
       - fix/dual-lama-no-sacrifice
     paths:
       - .github/workflows/one-time-dual-lama-no-sacrifice.yml
+      - .github/scripts/apply-ffmpeg-eof-recovery.py
 
 permissions:
   contents: write
