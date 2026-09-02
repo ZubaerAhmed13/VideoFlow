@@ -24,16 +24,16 @@ test("3 GiB 4K source uses session/reference architecture, proxy persistence and
   await expect(page.getByText(/session-attached/i)).toBeVisible();
 
   await page.getByRole("button", { name: "Video Tools" }).click();
-  await expect(page.getByText(/large-3gb-4k-sparse\.mp4/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "large-3gb-4k-sparse.mp4", exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Generate proxy/i }).click();
-  await expect(page.getByText(/Proxy ready|Editing proxy ready/i)).toBeVisible({ timeout: 300_000 });
+  await expect(page.getByRole("button", { name: /large-3gb-4k-sparse\.mp4.*Proxy ready/i })).toBeVisible({ timeout: 300_000 });
   await expect(page.getByText(/Saved locally/)).toBeVisible({ timeout: 15_000 });
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Projects" }).click();
   await page.locator(".vf-project-grid article button").first().click();
   await page.getByRole("button", { name: "Video Tools" }).click();
-  await expect(page.getByText(/Proxy ready/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /large-3gb-4k-sparse\.mp4.*Proxy ready/i })).toBeVisible();
 
   await page.getByTestId("media-relink").setInputFiles(large);
   await expect(page.getByText(/original source.*relinked/i)).toBeVisible();
