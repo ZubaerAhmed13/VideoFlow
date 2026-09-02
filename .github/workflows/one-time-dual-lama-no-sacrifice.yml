@@ -152,7 +152,20 @@ jobs:
           PY
 
       - name: Apply shared EOF-aware FFmpeg frame recovery
-        run: python .github/scripts/apply-ffmpeg-eof-recovery.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply-ffmpeg-eof-recovery.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("tests/final-browser-regressions.test.mjs")
+          text = path.read_text()
+          old = 'assert.match(ffmpeg, /"-ss", safeTime\\.toFixed\\(6\\)/);'
+          new = 'assert.match(ffmpeg, /"-ss", seekTime\\.toFixed\\(6\\)/);'
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one stale FFmpeg seek regression contract, found {text.count(old)}")
+          path.write_text(text.replace(old, new))
+          PY
 
       - name: Install dependencies
         run: npm ci
