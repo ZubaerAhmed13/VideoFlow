@@ -1,0 +1,99 @@
+name: VideoFlow Android Step 1 CI
+
+on:
+  push:
+    branches:
+      - android-step1-ci-20260902-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  step1-certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platform and tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg zip
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+      - name: Reconstruct Step 1 source
+        run: |
+          set -euo pipefail
+          mkdir -p android-step1-work
+          cat android-step1-ci/source.part*.b64 | tr -d '\n\r' | base64 -d > /tmp/VideoFlow_CI_Source_CodeOnly.zip
+          echo "e6f7cf59bfb956b6990b384d85ee0bd2c09a4dcb3e9fb869ec01cfd56a6909b3  /tmp/VideoFlow_CI_Source_CodeOnly.zip" | sha256sum -c -
+          unzip -q /tmp/VideoFlow_CI_Source_CodeOnly.zip -d android-step1-work
+          cd android-step1-work
+          gradle wrapper --gradle-version 9.6.0
+          chmod +x gradlew
+      - name: Generate MP4 fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p android-step1-work/app/src/androidTest/assets
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=30 -f lavfi -i sine=frequency=1000:sample_rate=48000 -t 3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest android-step1-work/app/src/androidTest/assets/sample_av.mp4
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -t 3 -c:v libx264 -pix_fmt yuv420p -an android-step1-work/app/src/androidTest/assets/sample_video_only.mp4
+          ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=240x320:rate=30 -t 3 -c:v libx264 -pix_fmt yuv420p -metadata:s:v:0 rotate=90 -an android-step1-work/app/src/androidTest/assets/sample_rotated.mp4
+          head -c 1024 /dev/urandom > android-step1-work/app/src/androidTest/assets/malformed.mp4
+      - name: Step 1 prohibited-pattern audit
+        run: |
+          set -euo pipefail
+          cd android-step1-work
+          ! grep -R -n -E 'inputStream\.readBytes\(\)|ByteArray\([^)]*(fileSize|sizeBytes|file\.length)|WebView|android\.permission\.INTERNET' app/src/main app/src/main/AndroidManifest.xml
+          ! grep -R -n -E 'TODO|FIXME|Coming Soon|Not Implemented' app/src/main
+      - name: Clean
+        working-directory: android-step1-work
+        run: ./gradlew clean --stacktrace
+      - name: Unit tests
+        working-directory: android-step1-work
+        run: ./gradlew test --stacktrace
+      - name: Android lint
+        working-directory: android-step1-work
+        run: ./gradlew lint --stacktrace
+      - name: Assemble debug
+        working-directory: android-step1-work
+        run: ./gradlew assembleDebug --stacktrace
+      - name: Assemble release
+        working-directory: android-step1-work
+        run: ./gradlew assembleRelease --stacktrace
+      - name: Instrumentation and Compose tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          disk-size: 4096M
+          script: cd android-step1-work && ./gradlew connectedDebugAndroidTest --stacktrace
+      - name: Package deliverables
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p step1-deliverables/reports
+          [ ! -f android-step1-work/app/build/outputs/apk/debug/app-debug.apk ] || cp android-step1-work/app/build/outputs/apk/debug/app-debug.apk step1-deliverables/VideoFlow_Android_Step1_Debug.apk
+          [ ! -f android-step1-work/app/build/outputs/apk/release/app-release.apk ] || cp android-step1-work/app/build/outputs/apk/release/app-release.apk step1-deliverables/VideoFlow_Android_Step1_Release.apk
+          cp -R android-step1-work/app/build/reports step1-deliverables/reports/app-build-reports 2>/dev/null || true
+          (cd android-step1-work && zip -qr ../step1-deliverables/VideoFlow_Android_Step1_CI_Source.zip . -x '.gradle/*' '*/build/*' '.idea/*' 'local.properties' '*.apk' '*.jks' '*.keystore')
+          cd step1-deliverables
+          sha256sum VideoFlow_Android_Step1_CI_Source.zip > SHA256SUMS.txt
+          for apk in *.apk; do [ -f "$apk" ] && sha256sum "$apk" >> SHA256SUMS.txt || true; done
+      - name: Upload certification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoFlow-Android-Step1-Certification
+          path: step1-deliverables
+          if-no-files-found: error
+          retention-days: 30
