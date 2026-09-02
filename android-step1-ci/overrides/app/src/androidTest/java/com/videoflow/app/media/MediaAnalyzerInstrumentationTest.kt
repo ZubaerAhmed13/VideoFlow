@@ -45,9 +45,13 @@ class MediaAnalyzerInstrumentationTest {
     }
 
     @Test
-    fun rotatedFixtureIsReadableAndRotationIsNeverFabricated() = runBlocking {
-        val result = analyzer.analyze(TestMediaProvider.uri("sample_rotated.mp4"))
-        assertTrue(result.metadata.videoTracks.isNotEmpty())
-        result.metadata.rotationDegrees?.let { assertTrue(it in setOf(0, 90, 180, 270)) }
+    fun rotatedFixtureIsReadableAndRotationIsNeverFabricated() {
+        runBlocking {
+            val result = analyzer.analyze(TestMediaProvider.uri("sample_rotated.mp4"))
+            assertTrue(result.metadata.videoTracks.isNotEmpty())
+            result.metadata.rotationDegrees?.let { rotation ->
+                assertTrue(rotation in setOf(0, 90, 180, 270))
+            }
+        }
     }
 }
