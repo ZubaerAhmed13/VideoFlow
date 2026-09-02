@@ -297,6 +297,28 @@ session_impl = r'''  const close = async (): Promise<void> => {
 
 write(path, text[:start] + session_impl + text[end:])
 
+tracking_test_path = "tests/tracking-batch-extraction.test.mjs"
+tracking_test = read(tracking_test_path)
+tracking_replacements = [
+    (
+        '  assert.match(ffmpeg, /timesSeconds\\.length <= 2/);',
+        '  assert.match(ffmpeg, /const regular = ordered\\.length > 2/);',
+    ),
+    (
+        '  assert.match(ffmpeg, /safeTime - 1 \\/ 30/);',
+        '  assert.match(ffmpeg, /const eofBackoffs = \\[1 \\/ 120, 1 \\/ 60, 1 \\/ 30, 1 \\/ 15, 1 \\/ 8\\] as const/);',
+    ),
+    (
+        '  assert.match(ffmpeg, /if \\(!regular\\)[\\s\\S]*exact\\.push\\(await capture\\(time, captureSignal\\)\\)/);',
+        '  assert.match(ffmpeg, /if \\(!regular\\)[\\s\\S]*exactOrdered\\("Decoding exact tracking frame with local FFmpeg"\\)/);',
+    ),
+]
+for old, new in tracking_replacements:
+    if tracking_test.count(old) != 1:
+        raise SystemExit(f"tracking EOF regression contract changed: {old!r}")
+    tracking_test = tracking_test.replace(old, new)
+write(tracking_test_path, tracking_test)
+
 write("tests/ffmpeg-frame-eof-recovery.test.mjs", r'''import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
