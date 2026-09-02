@@ -46,9 +46,11 @@ class DebugMediaProvider : ContentProvider() {
         ParcelFileDescriptor.open(materialize(uri), ParcelFileDescriptor.MODE_READ_ONLY)
 
     override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor {
-        val file = materialize(uri)
-        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        return AssetFileDescriptor(descriptor, 0L, file.length())
+        val descriptor = openFile(uri, mode)
+        // UNKNOWN_LENGTH marks this as a whole seekable file. Supplying an exact
+        // declared length makes ContentResolver.openFileDescriptor reject the
+        // descriptor as a bounded asset region ("Not a whole file").
+        return AssetFileDescriptor(descriptor, 0L, AssetFileDescriptor.UNKNOWN_LENGTH)
     }
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? = throw UnsupportedOperationException()
