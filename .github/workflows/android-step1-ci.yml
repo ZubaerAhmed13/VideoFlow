@@ -29,12 +29,14 @@ jobs:
           cmdline-tools-version: 15859902
           packages: platform-tools
 
-      - name: Install Android 17 API 37 platform and fixture tools
+      - name: Install Android 17 API 37 platform with Android CLI
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --channel=3 "platform-tools" "platforms;android-37"
-          sdkmanager --list_installed | grep -E 'platforms;android-37|platform-tools'
+          ANDROID_CLI="$ANDROID_HOME/cmdline-tools/15859902/bin/android"
+          "$ANDROID_CLI" --version
+          "$ANDROID_CLI" sdk install --canary platforms/android-37
+          test -f "$ANDROID_HOME/platforms/android-37/android.jar"
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg zip
 
