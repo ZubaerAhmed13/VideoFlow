@@ -105,6 +105,10 @@ jobs:
         working-directory: android-step1-work
         run: ./gradlew lint --stacktrace
 
+      - name: Compile instrumentation test sources
+        working-directory: android-step1-work
+        run: ./gradlew compileDebugAndroidTestKotlin --stacktrace
+
       - name: Assemble debug APK
         working-directory: android-step1-work
         run: ./gradlew assembleDebug --stacktrace
