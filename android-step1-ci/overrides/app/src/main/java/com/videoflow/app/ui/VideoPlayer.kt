@@ -26,7 +26,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 
-@OptIn(UnstableApi::class)
+@UnstableApi
 @Composable
 fun NativeVideoPlayer(uri: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
