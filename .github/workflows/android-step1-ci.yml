@@ -117,6 +117,20 @@ jobs:
         working-directory: android-step1-work
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Enable KVM acceleration for Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          echo "Before permission fix:"
+          ls -l /dev/kvm
+          sudo chown "$USER":"$(id -gn)" /dev/kvm
+          sudo chmod 660 /dev/kvm
+          echo "After permission fix:"
+          ls -l /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
       - name: Android emulator instrumentation and Compose tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -124,6 +138,8 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 600
           disk-size: 4096M
           script: cd android-step1-work && ./gradlew connectedDebugAndroidTest --stacktrace
 
