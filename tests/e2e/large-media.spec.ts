@@ -19,7 +19,7 @@ test("3 GiB 4K source uses session/reference architecture, proxy persistence and
   await page.goto("./");
   await page.getByTestId("media-import").setInputFiles(large);
   await expect(page.getByRole("dialog", { name: /Large Media Detected/i })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/3(\.0)? GB|3 GiB/i)).toBeVisible();
+  await expect(page.getByText(/3(?:\.0+)? GB|3 GiB/i)).toBeVisible();
   await page.getByRole("button", { name: "Session Only" }).click();
   await expect(page.getByText(/session-attached/i)).toBeVisible();
 
