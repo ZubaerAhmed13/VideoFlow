@@ -10,10 +10,10 @@ Blur, Pixelate, Cover and Clone are separate non-neural tools and are never repo
 
 | Field | Value |
 | --- | --- |
-| Model | LaMa Dynamic INT8 ONNX |
+| Model | LaMa 512 INT8 ONNX (production/final) + LaMa Dynamic INT8 ONNX (interactive WASM preview accelerator) |
 | Version | `g-ronimo-dynamic` |
 | License | Apache-2.0 |
-| Path | `models/lama-dynamic-int8.onnx` under the deployment base |
+| Path | `models/lama-512-int8.onnx + models/lama-dynamic-int8.onnx` under the deployment base |
 | Expected size | 61,512,617 bytes |
 | SHA-256 | `1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972` |
 | Metadata | `models/lama-dynamic-int8.model.json` |

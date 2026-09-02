@@ -6,8 +6,10 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 test("AI registry uses a real checksum-validated Apache-2.0 LaMa model descriptor", async () => {
   const source = await read("lib/videoflow/ai/AIModelRegistry.ts");
+  assert.match(source, /LaMa 512 INT8/);
   assert.match(source, /LaMa Dynamic INT8/);
   assert.match(source, /Apache-2\.0/);
+  assert.match(source, /cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe/);
   assert.match(source, /1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972/);
   assert.match(source, /inputWidth:\s*512/);
 });
@@ -38,7 +40,8 @@ test("4K AI path uses adaptive fixed-size ROI inference rather than full-frame n
   const tiling = await read("lib/videoflow/ai/inpainting/TiledInference.ts");
   assert.match(manager, /inferenceSize:\s*256 \| 512 = 512/);
   assert.match(manager, /extractROI\(source, plan\.roi, inferenceSize, inferenceSize\)/);
-  assert.match(controls, /reconstructFrame\(bitmap,[\s\S]*controller\.signal, 256\)/);
+  assert.match(controls, /const previewSize: 256 \| 512/);
+  assert.match(controls, /previewSize, "interactive"/);
   assert.match(manager, /restoreROI/);
   assert.match(manager, /planROITiles/);
   assert.match(roi, /normalizedMaskToROI/);

@@ -1,0 +1,13 @@
+{
+  "id": "lama-512-int8",
+  "name": "LaMa 512 INT8",
+  "role": "production-final",
+  "version": "g-ronimo-8e20140",
+  "license": "Apache-2.0",
+  "source": "https://huggingface.co/g-ronimo/lama/blob/main/lama_512_int8.onnx",
+  "sha256": "cab19978adc306622fe37ef60d4a52103b99c98141d499c2a2366a7ed1255dbe",
+  "sizeBytes": 62074990,
+  "localPath": "models/lama-512-int8.onnx",
+  "input": "1x4x512x512 float32 packed RGB+mask",
+  "installation": "Explicit user action installs the checksum-validated dual-model AI pack into protected local Cache Storage. The PWA shell never auto-precaches ONNX models."
+}

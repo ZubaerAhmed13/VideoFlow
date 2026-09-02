@@ -12,9 +12,10 @@ import {
   getAIModelRecord,
   installAIModel,
   installBundledAIModel,
+  isAIModelInstalled,
   removeAIModel,
 } from "@/lib/videoflow/ai/AIModelLoader";
-import { DEFAULT_AI_MODEL } from "@/lib/videoflow/ai/AIModelRegistry";
+import { DEFAULT_AI_MODEL, PREVIEW_AI_MODEL } from "@/lib/videoflow/ai/AIModelRegistry";
 import {
   installAIRuntime,
   removeAIRuntime,
@@ -68,11 +69,11 @@ export function AISettingsPanel() {
 
   const installBundled = async () => {
     setBusy(true);
-    setStatus("Validating bundled LaMa checksum…");
+    setStatus("Validating bundled production + preview LaMa checksums…");
     try {
       const record = await installBundledAIModel();
       setModel(record);
-      setStatus("Model installed locally and checksum verified.");
+      setStatus("AI model pack installed locally — checksum verified for both models.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
     } finally {
@@ -117,7 +118,11 @@ export function AISettingsPanel() {
       const runtime = await runtimeAvailability();
       if (!runtime.ready) throw new Error("Local ONNX runtime pack is incomplete.");
       const modelBytes = await getAIModelBytes(DEFAULT_AI_MODEL);
-      if (!modelBytes || modelBytes.byteLength !== DEFAULT_AI_MODEL.size) throw new Error("Checksum-validated model cache is unavailable or has the wrong size.");
+      if (!modelBytes || modelBytes.byteLength !== DEFAULT_AI_MODEL.size) throw new Error("Checksum-validated production model cache is unavailable or has the wrong size.");
+      if (isAIModelInstalled(PREVIEW_AI_MODEL.id)) {
+        const previewBytes = await getAIModelBytes(PREVIEW_AI_MODEL);
+        if (!previewBytes || previewBytes.byteLength !== PREVIEW_AI_MODEL.size) throw new Error("Checksum-validated preview accelerator cache is unavailable or has the wrong size.");
+      }
       await resetAISession();
       const image = new ImageData(512, 512);
       for (let y = 0; y < 512; y += 1) {
@@ -190,7 +195,7 @@ export function AISettingsPanel() {
         <ShieldCheck />
         <div>
           <strong>{DEFAULT_AI_MODEL.name}</strong>
-          <span>{installed ? `Checksum verified • ${DEFAULT_AI_MODEL.sha256.slice(0, 12)}… • ${(DEFAULT_AI_MODEL.size / 1024 / 1024).toFixed(1)} MiB` : bundled ? "Bundled model available to install" : "Model not installed"}</span>
+          <span>{installed ? `Checksum verified • production 512${isAIModelInstalled(PREVIEW_AI_MODEL.id) ? " + 256 preview accelerator" : ""} • ${((DEFAULT_AI_MODEL.size + (isAIModelInstalled(PREVIEW_AI_MODEL.id) ? PREVIEW_AI_MODEL.size : 0)) / 1024 / 1024).toFixed(1)} MiB` : bundled ? "Bundled production + preview pack available to install" : "Model not installed"}</span>
         </div>
       </div>
       <div className="vf-capability-grid">

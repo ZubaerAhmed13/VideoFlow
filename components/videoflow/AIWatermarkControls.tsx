@@ -5,12 +5,12 @@ import { Activity, CheckCircle2, Cpu, LoaderCircle, Sparkles, Trash2, Upload } f
 import { Button } from "@/components/ui/button";
 import { resolveWatermarkMask } from "@/lib/videoflow/core.mjs";
 import { DEFAULT_AI_SETTINGS, effectiveAISettings, reconstructFrame } from "@/lib/videoflow/ai/AIManager";
-import { captureVideoFrame, openFrameExtractionSession, releaseFrameExtractionSession, type FrameExtractionSession } from "@/lib/videoflow/ai/VideoFrameDecoder";
+import { captureVideoFrame, captureVideoFrames, openFrameExtractionSession, releaseFrameExtractionSession, type FrameExtractionSession } from "@/lib/videoflow/ai/VideoFrameDecoder";
 import { resetAIWorker } from "@/lib/videoflow/ai/AIWorkerClient";
 import { compositeInpaintedROI } from "@/lib/videoflow/ai/inpainting/InpaintPostprocessor";
 import { detectAICapability } from "@/lib/videoflow/ai/AICapability";
-import { bundledAIModelAvailable, getAIModelRecord, installAIModel, installBundledAIModel, removeAIModel } from "@/lib/videoflow/ai/AIModelLoader";
-import { DEFAULT_AI_MODEL } from "@/lib/videoflow/ai/AIModelRegistry";
+import { bundledAIModelAvailable, getAIModelRecord, installAIModel, installBundledAIModel, isAIModelInstalled, removeAIModel } from "@/lib/videoflow/ai/AIModelLoader";
+import { DEFAULT_AI_MODEL, PREVIEW_AI_MODEL } from "@/lib/videoflow/ai/AIModelRegistry";
 import { installAIRuntime, removeAIRuntime, runtimeAvailability } from "@/lib/videoflow/ai/AIRuntimeInstaller";
 import { trackTemplateWithWorker } from "@/lib/videoflow/ai/tracking/TrackingWorkerClient";
 import { renderAIPreviewSegment } from "@/lib/videoflow/ai/VideoInpainter";
@@ -38,6 +38,13 @@ function mergeTracking(existing: TrackingPoint[] | undefined, incoming: Tracking
 }
 
 type StillPreview = { before: string; after: string };
+const TRACKING_FFMPEG_MAX_BATCH_SIZE = 4;
+const TRACKING_BATCH_PIXEL_BUDGET = 16_000_000;
+
+function trackingFfmpegBatchSize(width: number, height: number): number {
+  const pixels = Math.max(1, width * height);
+  return Math.max(1, Math.min(TRACKING_FFMPEG_MAX_BATCH_SIZE, Math.floor(TRACKING_BATCH_PIXEL_BUDGET / pixels)));
+}
 
 export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, onReviewTime }: {
   clip: Clip;
@@ -91,8 +98,8 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
   };
 
   const installBundled = async () => {
-    setBusy(true); setError(null); setProgress("Validating bundled AI model…");
-    try { setRecord(await installBundledAIModel()); setProgress("Bundled AI model installed locally and checksum verified."); }
+    setBusy(true); setError(null); setProgress("Validating bundled production + preview AI pack…");
+    try { setRecord(await installBundledAIModel()); setProgress("Bundled AI pack installed locally — checksum verified for both models."); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   };
@@ -133,8 +140,17 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       const canvas = document.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
       const context = canvas.getContext("2d")!; context.drawImage(bitmap, 0, 0);
       const before = canvas.toDataURL("image/jpeg", 0.92);
-      setProgress("Running local ONNX inpainting…");
-      const result = await reconstructFrame(bitmap, bitmap.width, bitmap.height, resolved, settings, null, controller.signal, 256);
+      setProgress("Selecting the best local neural path…");
+      const capability = await detectAICapability();
+      const fullPreviewWebGPU = capability.webgpu === "available"
+        && settings.provider !== "wasm"
+        && (settings.provider === "webgpu" || capability.recommendedProvider === "webgpu");
+      const hasPreviewAccelerator = isAIModelInstalled(PREVIEW_AI_MODEL.id);
+      const previewSize: 256 | 512 = !fullPreviewWebGPU && hasPreviewAccelerator ? 256 : 512;
+      setProgress(previewSize === 256
+        ? "Running accelerated 256×256 local WASM preview; final reconstruction remains optimized 512×512…"
+        : "Running full 512×512 local ONNX preview…");
+      const result = await reconstructFrame(bitmap, bitmap.width, bitmap.height, resolved, settings, null, controller.signal, previewSize, "interactive");
       const effective = effectiveAISettings(settings);
       compositeInpaintedROI(context, result.imageData, result.roi, resolved, effective.feather, effective.blendingStrength);
       const preview = { before, after: canvas.toDataURL("image/jpeg", 0.92) };
@@ -142,7 +158,7 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       stillCache.current.set(cacheKey, preview);
       setStillPreview(preview);
       setSegmentPreviewUrl(null);
-      setProgress(`${result.provider.toUpperCase()} inference • ${Math.round(result.inferenceMs)} ms • ROI ${result.roi.width}×${result.roi.height} • ${result.tileCount} tile${result.tileCount === 1 ? "" : "s"}`);
+      setProgress(`${result.provider.toUpperCase()} inference • ${previewSize}×${previewSize} preview • ${Math.round(result.inferenceMs)} ms • ROI ${result.roi.width}×${result.roi.height} • ${result.tileCount} tile${result.tileCount === 1 ? "" : "s"} • final 512 preserved`);
       updateMask({ method: "ai", ai: { modelId: DEFAULT_AI_MODEL.id, modelVersion: DEFAULT_AI_MODEL.version, ...settings } }, "AI reconstruction enabled");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") setProgress("AI preview cancelled; resources released.");
@@ -185,6 +201,13 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
     const controller = new AbortController(); jobController.current = controller;
     setBusy(true); setError(null);
     let frameSession: FrameExtractionSession | null = null;
+    let trackingBatchStart = -1;
+    let trackingBatch: Array<ImageBitmap | null> = [];
+    const releaseTrackingBatch = () => {
+      for (const frame of trackingBatch) frame?.close();
+      trackingBatch = [];
+      trackingBatchStart = -1;
+    };
     try {
       setProgress("Opening and priming local media decoder for tracking…");
       const extractionSession = await openFrameExtractionSession(
@@ -210,12 +233,43 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       if (mode === "backward") for (let time = end; time >= start - 1e-6; time -= step) times.push(Math.max(start, time));
       else for (let time = start; time <= end + 1e-6; time += step) times.push(Math.min(end, time));
       if (Math.abs(times.at(-1)! - (mode === "backward" ? start : end)) > 0.001) times.push(mode === "backward" ? start : end);
+      const sourceTimes = times.map((timelineTime) =>
+        clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed,
+      );
+      const trackingBatchSize = trackingFfmpegBatchSize(
+        asset.proxy?.width ?? asset.width,
+        asset.proxy?.height ?? asset.height,
+      );
+      const provideTrackingFrame = async (timelineTime: number, index: number): Promise<ImageBitmap> => {
+        const sourceTime = sourceTimes[index]
+          ?? clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed;
+        if (!extractionSession.ffmpegSession) {
+          return captureVideoFrame(extractionSession, sourceTime, controller.signal);
+        }
+
+        const batchStart = Math.floor(index / trackingBatchSize) * trackingBatchSize;
+        const offset = index - batchStart;
+        // A tracking worker can fall back to the streaming implementation and
+        // request an earlier frame again. Refill a consumed slot rather than
+        // treating a safe worker restart as a media-decoder failure.
+        if (trackingBatchStart !== batchStart || !trackingBatch[offset]) {
+          releaseTrackingBatch();
+          const batchTimes = sourceTimes.slice(batchStart, batchStart + trackingBatchSize);
+          trackingBatch = (await captureVideoFrames(extractionSession, batchTimes, controller.signal))
+            .map((frame) => frame as ImageBitmap | null);
+          trackingBatchStart = batchStart;
+        }
+        const frame = trackingBatch[offset];
+        if (!frame) throw new Error(`Tracking frame ${index + 1} is unavailable after local batch decode.`);
+        trackingBatch[offset] = null;
+        return frame;
+      };
       const resolved = resolveWatermarkMask(mask, anchor) as WatermarkMask;
       const initial: TrackingPoint = { time: times[0], x: resolved.x, y: resolved.y, width: resolved.width, height: resolved.height, confidence: 1, method: "manual", manual: true };
       const result = await trackTemplateWithWorker(
         times,
         initial,
-        async (timelineTime) => captureVideoFrame(extractionSession, clip.sourceStart + Math.max(0, timelineTime - clip.timelineStart) * clip.speed, controller.signal),
+        provideTrackingFrame,
         {
           searchRadius: trackingProfile.searchRadius,
           signal: controller.signal,
@@ -244,8 +298,10 @@ export function AIWatermarkControls({ clip, mask, asset, playhead, updateMask, o
       if (caught instanceof DOMException && caught.name === "AbortError") setProgress("Tracking cancelled; decoded frames released.");
       else setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
+      releaseTrackingBatch();
       if (jobController.current === controller) jobController.current = null;
-      setBusy(false); if (frameSession) await releaseFrameExtractionSession(frameSession);
+      setBusy(false);
+      if (frameSession) await releaseFrameExtractionSession(frameSession);
     }
   };
 

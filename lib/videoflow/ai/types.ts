@@ -1,6 +1,7 @@
 export type AIProvider = "webgpu" | "wasm";
 export type AIModelState = "not-installed" | "installing" | "installed" | "loading" | "ready" | "error";
 export type AIQuality = "fast" | "balanced" | "high" | "maximum";
+export type AIInferencePurpose = "interactive" | "production";
 export type AIJobState = "waiting" | "preparing" | "loading-model" | "decoding" | "tracking" | "inference" | "temporal-pass" | "blending" | "encoding" | "complete" | "cancelled" | "failed";
 
 export interface AIModelDescriptor {
@@ -35,6 +36,7 @@ export interface AIModelInstallRecord {
   state: AIModelState;
   installedAt?: string;
   verifiedAt?: string;
+  installedModelIds?: string[];
   error?: string;
 }
 

@@ -10,6 +10,7 @@ test("GitHub web-upload asset parts reconstruct exact release binaries", () => {
   const manifestPath = join(root, "large-assets", "manifest.json");
   if (!existsSync(manifestPath)) {
     for (const target of [
+      "public/models/lama-512-int8.onnx",
       "public/models/lama-dynamic-int8.onnx",
       "public/vendor/ffmpeg/ffmpeg-core.wasm",
       "public/vendor/onnx/ort-wasm-simd-threaded.jsep.wasm",

@@ -1,11 +1,12 @@
-# LaMa Dynamic INT8 model notice
+# LaMa model notices
 
-- Model/export: LaMa Dynamic INT8 ONNX
-- Upstream project: LaMa — Resolution-robust Large Mask Inpainting with Fourier Convolutions
-- Export source: <https://huggingface.co/g-ronimo/lama/blob/main/lama_int8.onnx>
-- Declared license: Apache-2.0
-- SHA-256: `1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972`
-- Size: 61,512,617 bytes
-- VideoFlow use: local/offline neural ROI reconstruction; 256x256 interactive preview and 512x512 final/high-quality inference.
+VideoFlow bundles two Apache-2.0 ONNX exports from the same g-ronimo/LaMa model family:
 
-VideoFlow does not claim ownership of the upstream model. Distribution and use remain subject to the upstream model/project license and any rights in the user-supplied media.
+1. **LaMa 512 INT8** (`lama_512_int8.onnx`) — production/final fixed 512×512 model.
+2. **LaMa Dynamic INT8** (`lama_int8.onnx`) — interactive 256×256 preview accelerator on CPU/WASM.
+
+Upstream project: LaMa — Resolution-robust Large Mask Inpainting with Fourier Convolutions.
+Export source: https://huggingface.co/g-ronimo/lama
+Declared license: Apache-2.0.
+
+VideoFlow does not imply that neural inpainting recovers hidden original pixels; it generates plausible reconstruction from visible context.

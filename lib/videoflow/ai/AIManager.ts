@@ -5,7 +5,7 @@ import { extractOriginalROI, extractROI, normalizedMaskToROI, restoreROI } from 
 import { blendTiles, planROITiles } from "./inpainting/TiledInference";
 import { matchPatchBoundary } from "./inpainting/InpaintPostprocessor";
 import { blendBidirectionalContext, type TemporalFrame, type TemporalNeighborhood } from "./temporal/TemporalContext";
-import type { AIFrameResult, AISettings } from "./types";
+import type { AIFrameResult, AIInferencePurpose, AISettings } from "./types";
 import { updateAIDiagnostics } from "./AIDiagnostics";
 
 export const DEFAULT_AI_SETTINGS: AISettings = { provider: "auto", quality: "balanced", roiPadding: 96, maskExpansion: 8, feather: 12, temporalWindow: 9, consistencyStrength: 0.18, blendingStrength: 0.85, trackingMethod: "auto" };
@@ -35,6 +35,7 @@ export async function reconstructFrame(
   context?: TemporalNeighborhood | TemporalFrame[] | null,
   signal?: AbortSignal,
   inferenceSize: 256 | 512 = 512,
+  purpose: AIInferencePurpose = "production",
 ): Promise<AIFrameResult> {
   const effective = effectiveAISettings(settings);
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
@@ -49,7 +50,7 @@ export async function reconstructFrame(
       if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
       const prepared = extractROI(source, plan.roi, inferenceSize, inferenceSize);
       const modelMask = buildModelMask(mask, plan.roi, prepared.transform, effective.maskExpansion);
-      const result = await runImageInpainting(prepared.imageData, modelMask, effective, signal);
+      const result = await runImageInpainting(prepared.imageData, modelMask, effective, signal, purpose);
       provider = result.provider;
       inferenceMs += result.inferenceMs;
       processed.push({ plan, imageData: restoreROI(result.imageData, prepared.transform), transform: prepared.transform });

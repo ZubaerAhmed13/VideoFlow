@@ -24,6 +24,8 @@ test("ONNX execution stays supervised and adaptively recovers from stalled threa
   assert.match(client, /const providers: AIProvider\[\] = useWebgpu \? \["webgpu", "wasm"\] : \["wasm"\]/);
   assert.match(client, /WORKER_INIT_TIMEOUT_MS = 45_000/);
   assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
+  assert.match(client, /WORKER_PRODUCTION_BUDGET_MS = 420_000/);
+  assert.match(client, /WORKER_PRODUCTION_INFERENCE_TIMEOUT_MS = 300_000/);
   assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 125_000/);
   assert.match(client, /WORKER_MIN_TIMEOUT_SLICE_MS = 1_000/);
@@ -37,10 +39,11 @@ test("ONNX execution stays supervised and adaptively recovers from stalled threa
   const fallbackInference = constantMs(client, "WORKER_INFERENCE_TIMEOUT_MS");
   assert.ok(threadedProbe + fallbackInference < interactiveBudget);
   assert.ok(interactiveBudget - threadedProbe - fallbackInference >= 10_000);
-  assert.match(client, /const deadline = performance\.now\(\) \+ WORKER_INTERACTIVE_BUDGET_MS/);
+  assert.match(client, /const budgetMs = purpose === "interactive"/);
+  assert.match(client, /const deadline = performance\.now\(\) \+ budgetMs/);
   assert.match(client, /function timeoutWithinDeadline/);
-  assert.match(client, /timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\)/);
-  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer"\)/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init", budgetMs\)/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer", budgetMs\)/);
   assert.match(client, /Math\.min\(WORKER_INIT_TIMEOUT_MS, timeoutMs\)/);
 
   // Thread capability is learned from actual execution rather than UA sniffing.

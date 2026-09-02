@@ -43,9 +43,10 @@ test("ONNX execution adaptively supervises threaded WASM inside a killable worke
   assert.match(client, /WORKER_INTERACTIVE_BUDGET_MS = 165_000/);
   assert.match(client, /WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000/);
   assert.match(client, /WORKER_INFERENCE_TIMEOUT_MS = 125_000/);
+  assert.match(client, /WORKER_PRODUCTION_INFERENCE_TIMEOUT_MS = 300_000/);
   assert.match(client, /timeoutWithinDeadline/);
-  assert.match(client, /initialize\([\s\S]*timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init"\)/);
-  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer"\)/);
+  assert.match(client, /initialize\([\s\S]*modelDescriptor,[\s\S]*timeoutWithinDeadline\(deadline, WORKER_INIT_TIMEOUT_MS, "init", budgetMs\)/);
+  assert.match(client, /timeoutWithinDeadline\(deadline, timeoutCeiling, "infer", budgetMs\)/);
   const constantMs = (name) => {
     const match = client.match(new RegExp(`const ${name} = ([\\d_]+);`));
     assert.ok(match, `Missing ${name}`);
@@ -188,7 +189,7 @@ test("release dialogs and cross-browser imports remain bounded", async () => {
   assert.match(ffmpeg, /createFfmpegFrameExtractionSession/);
   assert.match(ffmpeg, /MEMFS_INPUT_LIMIT_BYTES = 64 \* 1024 \* 1024/);
   assert.match(ffmpeg, /instance\.mount\(WORKER_FS/);
-  assert.match(ffmpeg, /"-ss", safeTime\.toFixed\(6\)/);
+  assert.match(ffmpeg, /"-ss", seekTime\.toFixed\(6\)/);
   assert.match(ffmpeg, /"-frames:v", "1"/);
   assert.match(ffmpeg, /bytesToBlob\(data, "image\/png"\)/);
 });

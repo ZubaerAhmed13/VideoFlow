@@ -371,6 +371,52 @@ export async function captureVideoFrame(
   return captureFfmpegFrame(session, time, signal);
 }
 
+export async function captureVideoFrames(
+  session: FrameExtractionSession,
+  times: number[],
+  signal?: AbortSignal,
+): Promise<ImageBitmap[]> {
+  abortIfRequested(signal);
+  if (!times.length) return [];
+
+  // Keep native decoding on its proven exact-seek path. If native capture
+  // fails, captureVideoFrame transitions the shared session to FFmpeg and the
+  // next requested chunk automatically benefits from batch extraction.
+  if (session.nativeVideo) {
+    const nativeFrames: ImageBitmap[] = [];
+    for (const time of times) nativeFrames.push(await captureVideoFrame(session, time, signal));
+    return nativeFrames;
+  }
+
+  await openFfmpegFallback(session, signal);
+  const decodeBatch = async (): Promise<ImageBitmap[]> => {
+    const images = await session.ffmpegSession!.captureBatch(times, signal);
+    const frames: ImageBitmap[] = [];
+    try {
+      for (const image of images) frames.push(await bitmapFromImageBlob(image, signal));
+      return frames;
+    } catch (error) {
+      for (const frame of frames) frame.close();
+      throw error;
+    }
+  };
+
+  try {
+    return await decodeBatch();
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (!recoverableFfmpegFrameError(error) || !session.sourceBlob) throw error;
+
+    session.onPhase?.("Local FFmpeg batch decoder state fault; rebuilding decoder session…");
+    const failedSession = session.ffmpegSession;
+    session.ffmpegSession = null;
+    await failedSession?.close().catch(() => undefined);
+    abortIfRequested(signal);
+    await openFfmpegFallback(session, signal);
+    return decodeBatch();
+  }
+}
+
 export async function releaseFrameExtractionSession(session: FrameExtractionSession): Promise<void> {
   if (session.nativeVideo) {
     releaseNativeVideo(session.nativeVideo);

@@ -1,8 +1,8 @@
 import { deploymentAssetUrl } from "../base-url";
 import { detectAICapability } from "./AICapability";
 import { getAIModelBytes } from "./AIModelLoader";
-import { DEFAULT_AI_MODEL } from "./AIModelRegistry";
-import type { AIProvider, AISettings } from "./types";
+import { DEFAULT_AI_MODEL, modelForInferenceSize } from "./AIModelRegistry";
+import type { AIInferencePurpose, AIModelDescriptor, AIProvider, AISettings } from "./types";
 import { updateAIDiagnostics } from "./AIDiagnostics";
 
 type WorkerStage =
@@ -51,8 +51,10 @@ let restartCount = 0;
 
 const WORKER_INIT_TIMEOUT_MS = 45_000;
 const WORKER_INTERACTIVE_BUDGET_MS = 165_000;
+const WORKER_PRODUCTION_BUDGET_MS = 420_000;
 const WORKER_THREADED_PROBE_TIMEOUT_MS = 30_000;
 const WORKER_INFERENCE_TIMEOUT_MS = 125_000;
+const WORKER_PRODUCTION_INFERENCE_TIMEOUT_MS = 300_000;
 const WORKER_MIN_TIMEOUT_SLICE_MS = 1_000;
 const WASM_THREAD_PROFILE_KEY = "videoflow.ai.wasm-thread-limit";
 
@@ -99,11 +101,11 @@ class AIWorkerWatchdogError extends Error {
   }
 }
 
-function timeoutWithinDeadline(deadline: number, ceilingMs: number, operation: string): number {
+function timeoutWithinDeadline(deadline: number, ceilingMs: number, operation: string, budgetMs: number): number {
   const remaining = Math.floor(deadline - performance.now());
   if (remaining <= WORKER_MIN_TIMEOUT_SLICE_MS) {
     throw new AIWorkerWatchdogError(
-      `Local AI worker ${operation} exhausted the ${Math.round(WORKER_INTERACTIVE_BUDGET_MS / 1000)} second interactive budget.`,
+      `Local AI worker ${operation} exhausted the ${Math.round(budgetMs / 1000)} second ${budgetMs === WORKER_INTERACTIVE_BUDGET_MS ? "interactive" : "production"} budget.`,
       operation,
       "queued",
       activeProvider,
@@ -202,7 +204,7 @@ function request(
   });
 }
 
-async function resolveWorkerPlan(settings: AISettings): Promise<WorkerPlan> {
+async function resolveWorkerPlan(settings: AISettings, descriptor: AIModelDescriptor): Promise<WorkerPlan> {
   const capability = await detectAICapability();
   const requested = settings.provider === "auto" ? capability.recommendedProvider : settings.provider;
   const useWebgpu = requested === "webgpu" && capability.webgpu === "available";
@@ -211,21 +213,21 @@ async function resolveWorkerPlan(settings: AISettings): Promise<WorkerPlan> {
   const hardwareThreads = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 2));
   const maxWasmThreads = wasmThreadLimit ?? hardwareThreads;
   return {
-    key: `${runtimeFile}:${providers.join(",")}:threads-${maxWasmThreads}`,
+    key: `${descriptor.id}:${runtimeFile}:${providers.join(",")}:threads-${maxWasmThreads}`,
     runtimeFile,
     providers,
     maxWasmThreads,
   };
 }
 
-async function initialize(settings: AISettings, timeoutMs = WORKER_INIT_TIMEOUT_MS): Promise<AIProvider> {
-  const plan = await resolveWorkerPlan(settings);
+async function initialize(settings: AISettings, descriptor: AIModelDescriptor = DEFAULT_AI_MODEL, timeoutMs = WORKER_INIT_TIMEOUT_MS): Promise<AIProvider> {
+  const plan = await resolveWorkerPlan(settings, descriptor);
   if (initPromise && activePlanKey !== plan.key) await resetAIWorker();
   if (!initPromise) {
     activePlanKey = plan.key;
     const planKey = plan.key;
     initPromise = (async () => {
-      const model = await getAIModelBytes(DEFAULT_AI_MODEL);
+      const model = await getAIModelBytes(descriptor);
       if (!model) throw new Error("AI Reconstruction model not installed.");
       const reply = await request("init", {
         runtimeUrl: deploymentAssetUrl(`vendor/onnx/${plan.runtimeFile}`),
@@ -234,9 +236,9 @@ async function initialize(settings: AISettings, timeoutMs = WORKER_INIT_TIMEOUT_
         providers: plan.providers,
         hardwareConcurrency: navigator.hardwareConcurrency || 2,
         maxWasmThreads: plan.maxWasmThreads,
-        imageInput: DEFAULT_AI_MODEL.imageInput,
-        maskInput: DEFAULT_AI_MODEL.maskInput,
-        outputName: DEFAULT_AI_MODEL.output,
+        imageInput: descriptor.imageInput,
+        maskInput: descriptor.maskInput,
+        outputName: descriptor.output,
       }, [model], Math.min(WORKER_INIT_TIMEOUT_MS, timeoutMs));
       activeProvider = reply.provider ?? "wasm";
       activeWasmThreads = reply.wasmThreads ?? 1;
@@ -269,6 +271,7 @@ export async function runWorkerInpainting(
   mask: Float32Array,
   settings: AISettings,
   signal?: AbortSignal,
+  purpose: AIInferencePurpose = "production",
 ): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
   if (signal?.aborted) throw new DOMException("AI reconstruction cancelled.", "AbortError");
   const inferenceSize = image.width;
@@ -278,22 +281,29 @@ export async function runWorkerInpainting(
   if (mask.length !== inferenceSize * inferenceSize) {
     throw new Error(`Local AI mask size does not match the prepared ${inferenceSize}x${inferenceSize} ROI.`);
   }
-  const deadline = performance.now() + WORKER_INTERACTIVE_BUDGET_MS;
+  const modelDescriptor = modelForInferenceSize(inferenceSize);
+  const budgetMs = purpose === "interactive" ? WORKER_INTERACTIVE_BUDGET_MS : WORKER_PRODUCTION_BUDGET_MS;
+  const deadline = performance.now() + budgetMs;
+  updateAIDiagnostics({ model: modelDescriptor.name, modelVersion: modelDescriptor.version });
   const abort = () => { void resetAIWorker(); };
   signal?.addEventListener("abort", abort, { once: true });
   try {
     const attempt = async () => {
       const provider = await initialize(
         settings,
-        timeoutWithinDeadline(deadline, WORKER_INIT_TIMEOUT_MS, "init"),
+        modelDescriptor,
+        timeoutWithinDeadline(deadline, WORKER_INIT_TIMEOUT_MS, "init", budgetMs),
       );
       const rgba = new Uint8ClampedArray(image.data);
       const maskCopy = new Float32Array(mask);
       updateAIDiagnostics({ workerState: "inference" });
+      const reliableInferenceCeiling = purpose === "interactive"
+        ? WORKER_INFERENCE_TIMEOUT_MS
+        : WORKER_PRODUCTION_INFERENCE_TIMEOUT_MS;
       const timeoutCeiling = provider === "wasm" && activeWasmThreads > 1
         ? WORKER_THREADED_PROBE_TIMEOUT_MS
-        : WORKER_INFERENCE_TIMEOUT_MS;
-      const timeoutMs = timeoutWithinDeadline(deadline, timeoutCeiling, "infer");
+        : reliableInferenceCeiling;
+      const timeoutMs = timeoutWithinDeadline(deadline, timeoutCeiling, "infer", budgetMs);
       const reply = await request(
         "infer",
         { rgba: rgba.buffer, mask: maskCopy.buffer, size: inferenceSize },

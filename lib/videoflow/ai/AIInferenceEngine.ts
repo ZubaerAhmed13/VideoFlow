@@ -1,4 +1,4 @@
-import type { AIProvider, AISettings } from "./types";
+import type { AIInferencePurpose, AIProvider, AISettings } from "./types";
 import {
   initializeAIWorker,
   resetAIWorker,
@@ -14,6 +14,7 @@ export async function runImageInpainting(
   mask: Float32Array,
   settings: AISettings,
   signal?: AbortSignal,
+  purpose: AIInferencePurpose = "production",
 ): Promise<{ imageData: ImageData; provider: AIProvider; inferenceMs: number }> {
   if (signal?.aborted)
     throw new DOMException("AI reconstruction cancelled.", "AbortError");
@@ -25,7 +26,7 @@ export async function runImageInpainting(
   // Neural inference intentionally never falls back to the UI thread. A
   // stalled ONNX session must remain terminable by the worker watchdog rather
   // than freezing the editor after the worker has already been killed.
-  return runWorkerInpainting(image, mask, settings, signal);
+  return runWorkerInpainting(image, mask, settings, signal, purpose);
 }
 
 export async function resetAISession(): Promise<void> {

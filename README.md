@@ -102,7 +102,7 @@ VideoFlow detects capabilities instead of claiming universal codec support. Nati
 - supported export targets: MP4/H.264/AAC, WebM/VP9/Opus, GIF, WAV, MP3, and Opus
 - basic FFmpeg `deshake` stabilization is available; multi-pass optical-flow stabilization is not installed
 - pitch and tempo are controlled independently with FFmpeg resampling and tempo filters, but this is not formant-preserving vocal processing
-- neural reconstruction uses a checksum-pinned LaMa Dynamic INT8 ONNX model through local ONNX Runtime Web; WebGPU is attempted only after real adapter/device initialization and WASM is the fallback; automatic tracking and temporal alignment use local template/multi-block motion and are not mislabeled as dense optical flow
+- neural reconstruction uses a checksum-pinned dual LaMa pack (optimized 512 final + dynamic 256 WASM preview accelerator) ONNX model through local ONNX Runtime Web; WebGPU is attempted only after real adapter/device initialization and WASM is the fallback; automatic tracking and temporal alignment use local template/multi-block motion and are not mislabeled as dense optical flow
 - export jobs run serially; cancellation terminates the active local worker, so pause/resume is intentionally not presented
 - very large, 4K/8K, high-frame-rate, ten-bit, or long projects remain hardware/browser dependent; high-risk MP4 output uses an adaptive segmented direct-to-disk path where the browser exposes File System Access
 - reference sources can reconnect through persisted file handles on supporting browsers; session sources reopen as offline while persisted proxies/project edits remain available until the original is relinked

@@ -7,6 +7,7 @@ const reportPath = join(root, "playwright-report", "results.json");
 const evidencePath = join(root, "ci-results", "browser-capabilities.jsonl");
 const unitLogPath = join(root, "ci-results", "unit.log");
 const realLargeEvidencePath = join(root, "ci-results", "real-large-media-fixture.json");
+const aiWasmEvidencePath = join(root, "ci-results", "ai-wasm-certification.json");
 const realLargeStatus = existsSync(realLargeEvidencePath) ? "PASS" : "NOT VERIFIED";
 
 function fail(message) {
@@ -16,6 +17,7 @@ function fail(message) {
 
 if (!existsSync(reportPath)) fail(`Missing Playwright JSON report: ${reportPath}`);
 if (!existsSync(evidencePath)) fail(`Missing browser capability evidence: ${evidencePath}`);
+if (!existsSync(aiWasmEvidencePath)) fail(`Missing dual-model WASM certification evidence: ${aiWasmEvidencePath}`);
 
 const report = JSON.parse(readFileSync(reportPath, "utf8"));
 const browserStats = new Map();
@@ -98,13 +100,21 @@ const rows = ["chromium", "firefox", "webkit"].map((browser) => {
   return `| ${browser[0].toUpperCase() + browser.slice(1)} | ${s.passed} | ${s.failed} | ${s.skipped} | ${providerFor(browser)} | ${webgpuFor(browser)} |`;
 }).join("\n");
 
+const aiWasm = JSON.parse(readFileSync(aiWasmEvidencePath, "utf8"));
 const model = {
-  name: "LaMa Dynamic INT8 ONNX",
-  version: "g-ronimo / 8e20140-compatible descriptor",
-  sha256: "1941214c210399eb815eb2d32570ba91d5e6c4ac3de4c939bd3fb09300454972",
-  license: "Apache-2.0",
-  size: "62.1 MB",
-  runtime: "ONNX Runtime Web 1.29.0",
+  name: aiWasm.productionModel.model,
+  version: aiWasm.productionModel.version,
+  sha256: aiWasm.productionModel.modelSha256,
+  license: aiWasm.productionModel.license,
+  size: `${(aiWasm.productionModel.modelBytes / 1024 / 1024).toFixed(1)} MiB`,
+  runtime: aiWasm.runtime,
+};
+const previewModel = {
+  name: aiWasm.previewModel.model,
+  version: aiWasm.previewModel.version,
+  sha256: aiWasm.previewModel.modelSha256,
+  license: aiWasm.previewModel.license,
+  size: `${(aiWasm.previewModel.modelBytes / 1024 / 1024).toFixed(1)} MiB`,
 };
 
 const release = `# VideoFlow Professional Core 1.0.0 — AI Release Certification
@@ -119,14 +129,18 @@ This status is generated only after all mandatory workflow commands return succe
 
 ## Local AI pack
 
-- Model: **${model.name}**
-- Model version: ${model.version}
+- Production/final model: **${model.name}**
+- Production model version: ${model.version}
+- Production model SHA-256: \`${model.sha256}\`
+- Production model size: ${model.size}
+- Interactive WASM preview accelerator: **${previewModel.name}**
+- Preview model version: ${previewModel.version}
+- Preview model SHA-256: \`${previewModel.sha256}\`
+- Preview model size: ${previewModel.size}
 - License: ${model.license}
-- Model SHA-256: \`${model.sha256}\`
-- Model size: ${model.size}
 - Runtime: **${model.runtime}**
 - Inference: local browser ONNX; WebGPU where initialization succeeds, WASM fallback otherwise
-- Neural input contract: one \`[1,4,512,512]\` tensor (masked RGB + binary mask)
+- Neural input contract: final/high-quality uses \`[1,4,512,512]\`; interactive CPU/WASM still preview may use \`[1,4,256,256]\` with the separate dynamic accelerator
 - Privacy: frames/masks are processed locally; AI media is not sent to a remote inference service
 
 ## Actual commands in the certified clean runner
@@ -265,14 +279,12 @@ const aiDoc = `# VideoFlow AI Reconstruction
 
 ## Model and license
 
-- Model: ${model.name}
-- Source family: g-ronimo/lama browser-oriented ONNX export
+- Production/final model: ${model.name} — ${model.size} — SHA-256 \`${model.sha256}\`
+- Interactive WASM preview accelerator: ${previewModel.name} — ${previewModel.size} — SHA-256 \`${previewModel.sha256}\`
+- Source family: g-ronimo/lama browser-oriented ONNX exports
 - License: ${model.license}
-- Version descriptor: ${model.version}
-- Size: ${model.size}
-- SHA-256: \`${model.sha256}\`
-- Input: \`[1,4,512,512]\` (masked RGB channels + binary mask)
-- Output: \`[1,3,512,512]\`
+- Final input/output: \`[1,4,512,512]\` → \`[1,3,512,512]\`
+- Interactive CPU/WASM preview accelerator input/output: \`[1,4,256,256]\` → \`[1,3,256,256]\`
 
 ## Runtime
 
@@ -284,8 +296,8 @@ ${model.runtime} runs locally. VideoFlow attempts a real WebGPU adapter/device a
 source/proxy trajectory
 → source-resolution ROI + context padding
 → mask expansion/normalization
-→ 512×512 neural input
-→ LaMa ONNX inference in module worker
+→ 512×512 production neural input (final/export) OR 256×256 dynamic accelerator (interactive CPU/WASM still preview only)
+→ checksum-pinned LaMa ONNX inference in module worker
 → mask-aware feather/edge composition
 → motion-compensated bounded temporal consistency
 → source-resolution frame
@@ -360,6 +372,8 @@ writeFileSync(join(root, "ci-results", "certification-summary.json"), JSON.strin
   browsers: Object.fromEntries(browserStats),
   evidence,
   model,
+  previewModel,
+  aiWasm,
   releaseStatus: "READY",
   realLargeEncodedMedia: realLargeStatus,
 }, null, 2));

@@ -1,6 +1,6 @@
 # VideoFlow AI Reconstruction Pack
 
-The final release includes the checksum-pinned LaMa Dynamic INT8 ONNX model at `public/models/lama-dynamic-int8.onnx`; a fresh build copies it to `dist/client/models/lama-dynamic-int8.onnx`. The app does not automatically download or precache the model. The user explicitly installs it into protected local Cache Storage.
+The final release includes the checksum-pinned dual LaMa pack (optimized 512 final + dynamic 256 WASM preview accelerator) ONNX model at `public/models/lama-dynamic-int8.onnx`; a fresh build copies it to `dist/client/models/lama-dynamic-int8.onnx`. The app does not automatically download or precache the model. The user explicitly installs it into protected local Cache Storage.
 
 Model metadata:
 
